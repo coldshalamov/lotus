@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="title desc">
+  <title id="title">Encoding overhead across 0..2^32</title>
+  <desc id="desc">Approximate overhead in bits beyond log2(n) for Lotus J2D1, Lotus J1D2, LEB128, and Elias delta.</desc>
+  <style>
+    text { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; fill: #111827; }
+    .axis { stroke: #9ca3af; stroke-width: 1; }
+    .grid { stroke: #e5e7eb; stroke-width: 1; }
+    .lotus1 { stroke: #2563eb; stroke-width: 2.5; fill: none; }
+    .lotus2 { stroke: #7c3aed; stroke-width: 2.5; fill: none; }
+    .leb { stroke: #16a34a; stroke-width: 2.5; fill: none; stroke-dasharray: 6 4; }
+    .elias { stroke: #f59e0b; stroke-width: 2.5; fill: none; stroke-dasharray: 3 3; }
+  </style>
+  <rect width="640" height="360" fill="#ffffff" rx="8" ry="8" />
+  <g transform="translate(70,32)">
+    <text x="140" y="-10" font-size="18" font-weight="600">Overhead vs ideal code length</text>
+    <line class="axis" x1="0" y1="280" x2="500" y2="280" />
+    <line class="axis" x1="0" y1="0" x2="0" y2="280" />
+    <g stroke="#e5e7eb" stroke-width="1">
+      <line x1="0" y1="70" x2="500" y2="70" />
+      <line x1="0" y1="140" x2="500" y2="140" />
+      <line x1="0" y1="210" x2="500" y2="210" />
+    </g>
+    <text x="-14" y="284" font-size="12" text-anchor="end">0</text>
+    <text x="-14" y="214" font-size="12" text-anchor="end">1</text>
+    <text x="-14" y="144" font-size="12" text-anchor="end">2</text>
+    <text x="-14" y="74" font-size="12" text-anchor="end">3</text>
+    <text x="120" y="304" font-size="12">1e1</text>
+    <text x="220" y="304" font-size="12">1e3</text>
+    <text x="320" y="304" font-size="12">1e5</text>
+    <text x="420" y="304" font-size="12">1e7</text>
+    <path class="lotus1" d="M0,200 C80,180 140,160 180,140 C240,120 300,100 360,86 C420,72 480,64 500,60" />
+    <path class="lotus2" d="M0,210 C80,195 140,180 180,165 C240,148 300,132 360,120 C420,108 480,98 500,95" />
+    <path class="leb" d="M0,230 C60,225 140,220 200,210 C260,200 330,190 380,182 C440,172 470,166 500,162" />
+    <path class="elias" d="M0,250 C80,245 150,238 210,228 C270,218 330,205 380,192 C430,178 470,166 500,156" />
+    <g transform="translate(120,16)">
+      <rect x="0" y="0" width="14" height="14" fill="#2563eb" rx="3" />
+      <text x="20" y="12" font-size="12">Lotus J2D1</text>
+      <rect x="120" y="0" width="14" height="14" fill="#7c3aed" rx="3" />
+      <text x="140" y="12" font-size="12">Lotus J1D2</text>
+      <rect x="240" y="0" width="14" height="14" fill="#16a34a" rx="3" />
+      <text x="260" y="12" font-size="12">LEB128</text>
+      <rect x="340" y="0" width="14" height="14" fill="#f59e0b" rx="3" />
+      <text x="360" y="12" font-size="12">Elias delta</text>
+    </g>
+  </g>
+</svg>

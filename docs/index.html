@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lotus codec playground</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem; }
+    pre { background: #f6f8fa; padding: 1rem; border-radius: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    input, select, button { padding: 0.5rem; font-size: 1rem; }
+    footer { margin-top: 2rem; font-size: 0.9rem; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Lotus: density-reclaiming integer codec</h1>
+  <p>Interactive explainer: tweak parameters and see how Lotus compares to byte varints.</p>
+  <div class="grid">
+    <div>
+      <h3>Encode</h3>
+      <label>Value <input id="value" type="number" value="42"></label><br>
+      <label>Jumpstarter (J) <input id="jump" type="number" value="2"></label><br>
+      <label>Tiers (d) <input id="tiers" type="number" value="1"></label><br>
+      <button onclick="encode()">Encode</button>
+      <pre id="encoded"></pre>
+    </div>
+    <div>
+      <h3>Overhead calculator</h3>
+      <p id="overhead"></p>
+      <canvas id="chart" width="480" height="260"></canvas>
+    </div>
+  </div>
+
+  <script>
+    function lotusPayload(value) {
+      let width = 1n;
+      while (true) {
+        const start = (1n << width) - 2n;
+        const end = (1n << (width + 1n)) - 3n;
+        if (value <= end) return { width: Number(width), payload: value - start };
+        width += 1n;
+      }
+    }
+    function lotusWidth(v) { return (BigInt(v + 1).toString(2).length - 1); }
+    function encode() {
+      const v = BigInt(document.getElementById('value').value || '0');
+      const j = Number(document.getElementById('jump').value || 2);
+      const d = Number(document.getElementById('tiers').value || 1);
+      const { width: payloadWidth, payload } = lotusPayload(v);
+      let current = BigInt(payloadWidth);
+      const fields = [];
+      for (let i = 0; i < d; i++) {
+        const w = lotusWidth(Number(current));
+        const start = (1n << BigInt(w)) - 2n;
+        fields.push({ width: w, payload: current - start });
+        current = BigInt(w);
+      }
+      if (current >= (1n << BigInt(j))) {
+        document.getElementById('encoded').textContent = 'jumpstarter overflow';
+        return;
+      }
+      const bits = [];
+      bits.push(current.toString(2).padStart(j, '0'));
+      fields.reverse().forEach(f => bits.push(f.payload.toString(2).padStart(f.width, '0')));
+      bits.push(payload.toString(2).padStart(payloadWidth, '0'));
+      document.getElementById('encoded').textContent = bits.join(' ');
+      document.getElementById('overhead').textContent = `Payload width ${payloadWidth} bits; total bits ${bits.join('').length}`;
+      drawChart(Number(v));
+    }
+    function lebBytes(v) {
+      let value = BigInt(v);
+      let len = 0;
+      while (true) {
+        len += 1;
+        value >>= 7n;
+        if (value === 0n) break;
+      }
+      return len * 8;
+    }
+    function drawChart(v) {
+      const ctx = document.getElementById('chart').getContext('2d');
+      ctx.clearRect(0,0,480,260);
+      const base = Math.log2(Math.max(1, v));
+      const lotusOver = 1.2;
+      const lebOver = (Math.ceil(base / 7) * 8) - base;
+      const eliasOver = (base + Math.log2(base + 1)) - base;
+      const values = [lotusOver, lebOver, eliasOver];
+      const labels = ['Lotus', 'LEB128', 'Elias Δ'];
+      const max = Math.max(...values, 1);
+      labels.forEach((l, i) => {
+        const height = (values[i] / max) * 200;
+        ctx.fillStyle = ['#5b8def', '#4caf50', '#d35400'][i];
+        ctx.fillRect(40 + i * 140, 220 - height, 60, height);
+        ctx.fillStyle = '#000';
+        ctx.fillText(l, 40 + i * 140, 240);
+      });
+      ctx.fillStyle = '#000';
+      ctx.fillText('Overhead (bits beyond log2(n))', 40, 20);
+    }
+    encode();
+  </script>
+
+  <footer>
+    Lotus is experimental research software. See the <a href="./WHITEPAPER.md">whitepaper</a> and <a href="./RESULTS.md">results</a> for details.
+  </footer>
+</body>
+</html>
