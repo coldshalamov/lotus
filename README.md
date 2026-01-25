@@ -12,13 +12,7 @@ Byte-quantized varints and unary-style universal codes leave code space on the t
 
 ## Quick comparison
 
-| workload | Lotus J2D1 (bits/value) | LEB128 (bytes/value) | Elias Delta (bits/value) |
-|---|---|---|---|
-| Small (0-255) | 7.10 | 1.10 | 10.2 |
-| Medium (0-1M) | 14.20 | 2.70 | 17.5 |
-| Large32 | 25.00 | 5.10 | 30.0 |
-
-See full methodology in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+Lotus is tunable; the size curve depends on `(J, d)` and on how wide a range you need to cover. See the config sweep (with coverage) in [docs/RESULTS.md](docs/RESULTS.md) and the methodology in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ![Benchmark snapshot](docs/images/performance.svg)
 

@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use lotus::{LOTUS_J2D1, LotusError, lotus_decode_u64, lotus_encode_u64};
+use lotus::{LOTUS_J2D1, LotusError, lotus_decode_u64, lotus_encode_u64, lotus_encoded_bits};
 use std::io::{self, Read};
 use std::time::Instant;
 
@@ -104,12 +104,7 @@ fn run_benchmark() -> Result<(), LotusError> {
         let start = Instant::now();
         let lotus_bits: usize = values
             .iter()
-            .map(|v| {
-                lotus_encode_u64(*v, LOTUS_J2D1.0, LOTUS_J2D1.1)
-                    .unwrap()
-                    .len()
-                    * 8
-            })
+            .map(|v| lotus_encoded_bits(*v, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap())
             .sum();
         let lotus_elapsed = start.elapsed();
         let leb_bytes: usize = values.iter().map(|v| leb128_encode(*v).len()).sum();

@@ -9,6 +9,8 @@ The public API intentionally mirrors the mathematical construction from the whit
   * Returns the minimal byte buffer containing the encoded payload.
 * `lotus_decode_u64(bytes: &[u8], j_bits: usize, tiers: usize) -> Result<(u64, usize), LotusError>`
   * Decodes an integer and returns both the value and the number of bits consumed from `bytes`.
+* `lotus_encoded_bits(value: u64, j_bits: usize, tiers: usize) -> Result<usize, LotusError>`
+  * Returns the precise number of bits used to encode a value for size reporting.
 * `BitWriter` / `BitReader`
   * Streaming helpers for advanced scenarios such as incremental network framing.
 * Presets
