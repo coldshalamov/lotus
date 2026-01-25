@@ -88,6 +88,16 @@ The first field cannot have its length described by a preceding field, because n
 
 So the first component must be fixed-width by specification. That fixed anchor is the jumpstarter.
 
+### **2.1 FAQ: decoding streams and “where does one integer end?”**
+
+* **How do I decode a block of integers without a terminator?**  
+  Each codeword is self-delimiting: the jumpstarter tells you the width of the first tier, each tier tells you the width of the next tier, and the final tier tells you the payload width. Once the payload is read, the next bit begins the next integer. There is no ambiguity between `0` and `00` because the header chain fixes the payload width before the payload bits are read.
+
+* **Are tier fields fixed width?**  
+  Yes. The *width* of each tier is determined by the previous tier’s decoded value, so once you read tier *i* you know the exact bit width of tier *i+1*. The tier *values* are Lotus-encoded integers, but the *tier widths* are fixed for that codeword.
+
+These are the two facts that keep the format prefix-decodable in a stream.
+
 ---
 
 ## **3\) The Lotus codec family: parameters and structure**
@@ -118,7 +128,11 @@ For a given (J, d), there is a maximum initial width w\_1 \\le 2^J. That bounds 
 
 This is the “not truly unbounded, but might as well be” point: modest configurations already cover absurd ranges (certainly beyond 64-bit) while remaining prefix-decoded within that envelope.
 
-### **3.3 Optional “escape mode” for full universality**
+### **3.3 Implementation note**
+
+In the Rust implementation, each tier uses the same Lotus fixed-width mapping as the payload. That is: once a tier width is known, the tier value is encoded as `value - (2^width - 2)`. The final tier yields the payload width, after which the payload bits are read. This directly mirrors the “tier widths determine the next field length” story above.
+
+### **3.4 Optional “escape mode” for full universality**
 
 If a fully unbounded codec is required, reserve one jumpstarter pattern as an escape to a conventional universal code (e.g., Elias Delta). Then Lotus remains optimal on the intended range while being formally universal.
 
@@ -431,4 +445,3 @@ Given a target distribution of integers (what your system tends to serialize), c
   * (J=3, d=1)
 
      Both performed similarly in the 32/64-bit uniform tests above.
-

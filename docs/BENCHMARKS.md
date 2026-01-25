@@ -14,6 +14,6 @@ Each suite measures encode throughput and average encoded size for:
 * LEB128
 * Elias Delta
 
-Running `cargo bench --bench comparison` generates a Criterion report under `target/criterion/` and a machine-readable CSV in `docs/RESULTS.md` when invoked via the helper script.
+Running `cargo bench --bench comparison` generates a Criterion report under `target/criterion/`. The helper script `scripts/reproduce_paper.sh` also runs `examples/size_report.rs` to regenerate `docs/RESULTS.md` with a configuration sweep that reports average bits/value and coverage (percentage of values encodable without overflow) for multiple `(J, d)` pairs.
 
 See also the charts embedded in the README and `docs/images/` for a visual summary.

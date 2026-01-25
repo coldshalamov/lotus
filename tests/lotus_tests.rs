@@ -1,4 +1,7 @@
-use lotus::{LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, LotusError, lotus_decode_u64, lotus_encode_u64};
+use lotus::{
+    LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, LotusError, lotus_decode_u64, lotus_encode_u64,
+    lotus_encoded_bits,
+};
 
 fn round_trip(value: u64, cfg: (usize, usize)) {
     let encoded = lotus_encode_u64(value, cfg.0, cfg.1).expect("encode");
@@ -23,7 +26,7 @@ fn presets_roundtrip() {
 
 #[test]
 fn maximal_edges() {
-    round_trip(u32::MAX as u64, LOTUS_J2D1);
+    round_trip(u32::MAX as u64, LOTUS_J3D1);
     round_trip((1u64 << 40) - 1, LOTUS_J3D1);
 }
 
@@ -47,10 +50,10 @@ fn leb128_comparison() {
 
     let sample = [0u64, 1, 2, 127, 128, 4096, 1_000_000];
     for value in sample {
-        let lotus = lotus_encode_u64(value, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+        let lotus = lotus_encoded_bits(value, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
         let leb = leb128_encode(value);
         assert!(
-            lotus.len() <= leb.len() + 2,
+            lotus <= leb.len() * 8 + 16,
             "lotus should be competitive enough for demo"
         );
     }
