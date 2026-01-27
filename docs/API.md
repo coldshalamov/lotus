@@ -46,8 +46,3 @@ Most callers will wire the presets into higher-level protocols:
 use lotus::{lotus_encode_u64, lotus_decode_u64, LOTUS_J2D1};
 
 let encoded = lotus_encode_u64(42, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
-let (decoded, _bits) = lotus_decode_u64(&encoded, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
-assert_eq!(decoded, 42);
-```
-
-For streaming applications, reuse a `BitWriter` and feed chunks directly into sockets or files.
