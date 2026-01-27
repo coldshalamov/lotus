@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
 
 use thiserror::Error;
+#[cfg(feature = "bigint")]
+use num_bigint::BigUint;
+#[cfg(feature = "bigint")]
+use num_traits::One;
 
 /// Errors emitted by Lotus codecs.
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -134,6 +138,22 @@ fn lotus_encode_value(value: u64) -> Result<(u64, usize), LotusError> {
     }
 }
 
+#[cfg(feature = "bigint")]
+fn lotus_encode_value_biguint(value: &BigUint) -> Result<(BigUint, usize), LotusError> {
+    let m = value + BigUint::one();
+    let mut width = 1usize;
+    loop {
+        let width_plus_one = width.checked_add(1).ok_or(LotusError::ValueTooLarge)?;
+        let start = (BigUint::one() << width) - 2u8;
+        let end = (BigUint::one() << width_plus_one) - 3u8;
+        if m >= start && m <= end {
+            let payload = m - start;
+            return Ok((payload, width));
+        }
+        width = width.checked_add(1).ok_or(LotusError::ValueTooLarge)?;
+    }
+}
+
 fn max_width_for_config(j_bits: usize, tiers: usize) -> u128 {
     let mut max_width = 1u128 << j_bits;
     for _ in 0..tiers {
@@ -168,6 +188,79 @@ fn lotus_decode_value(payload: u64, width: usize) -> Result<u64, LotusError> {
         return Err(LotusError::ValueTooLarge);
     }
     Ok(value as u64)
+}
+
+#[cfg(feature = "bigint")]
+fn write_biguint_bits(
+    writer: &mut BitWriter,
+    value: &BigUint,
+    width: usize,
+) -> Result<(), LotusError> {
+    let bit_len = value.bits() as usize;
+    if bit_len > width {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let mut remaining_zeros = width - bit_len;
+    while remaining_zeros > 0 {
+        let chunk = remaining_zeros.min(8);
+        writer.write_bits(0, chunk)?;
+        remaining_zeros -= chunk;
+    }
+    if bit_len == 0 {
+        return Ok(());
+    }
+    let bytes = value.to_bytes_be();
+    let leading_bits = bit_len % 8;
+    let mut index = 0;
+    if leading_bits != 0 {
+        let mask = (1u8 << leading_bits) - 1;
+        let part = bytes[0] & mask;
+        writer.write_bits(part as u64, leading_bits)?;
+        index = 1;
+    }
+    for &byte in &bytes[index..] {
+        writer.write_bits(byte as u64, 8)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "bigint")]
+/// Encode an arbitrary-precision unsigned integer using Lotus tiered headers.
+pub fn lotus_encode_biguint(
+    value: &BigUint,
+    j_bits: usize,
+    tiers: usize,
+) -> Result<Vec<u8>, LotusError> {
+    if !(1..=8).contains(&j_bits) || tiers == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+
+    let (payload_bits, payload_width) = lotus_encode_value_biguint(value)?;
+    let max_width = max_width_for_config(j_bits, tiers);
+    if payload_width as u128 > max_width {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let mut tier_chain: Vec<(u64, usize)> = Vec::with_capacity(tiers);
+    let mut current_width = payload_width;
+
+    for _ in 0..tiers {
+        let (tier_bits, tier_width) = lotus_encode_value(current_width as u64)?;
+        tier_chain.push((tier_bits, tier_width));
+        current_width = tier_width;
+    }
+
+    if current_width == 0 || current_width > (1usize << j_bits) {
+        return Err(LotusError::JumpstarterOverflow);
+    }
+    let jump_val = (current_width - 1) as u64;
+
+    let mut writer = BitWriter::new();
+    writer.write_bits(jump_val, j_bits)?;
+    for (bits, width) in tier_chain.iter().rev() {
+        writer.write_bits(*bits, *width)?;
+    }
+    write_biguint_bits(&mut writer, &payload_bits, payload_width)?;
+    Ok(writer.into_bytes())
 }
 
 /// Encode an unsigned 64-bit integer using Lotus tiered headers.

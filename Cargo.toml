@@ -13,11 +13,14 @@ categories = ["compression", "data-structures", "encoding"]
 readme = "README.md"
 
 [features]
-default = ["small-int-fastpath"]
+default = ["small-int-fastpath", "bigint"]
 small-int-fastpath = []
+bigint = ["dep:num-bigint", "dep:num-traits"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
+num-bigint = { version = "0.4", optional = true }
+num-traits = { version = "0.2", optional = true }
 hex = "0.4"
 thiserror = "1.0"
 

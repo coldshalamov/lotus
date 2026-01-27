@@ -9,6 +9,8 @@ The public API intentionally mirrors the mathematical construction from the whit
   * Returns the minimal byte buffer containing the encoded payload.
 * `lotus_decode_u64(bytes: &[u8], j_bits: usize, tiers: usize) -> Result<(u64, usize), LotusError>`
   * Decodes an integer and returns both the value and the number of bits consumed from `bytes`.
+* `lotus_encode_biguint(value: &BigUint, j_bits: usize, tiers: usize) -> Result<Vec<u8>, LotusError>`
+  * Encodes an arbitrary-precision integer when the `bigint` feature is enabled.
 * `BitWriter` / `BitReader`
   * Streaming helpers for advanced scenarios such as incremental network framing.
 * Presets
@@ -25,6 +27,10 @@ The `LotusError` enum models all error cases without panicking:
 * `InvalidEncoding`: the bit pattern cannot be mapped to a valid Lotus value.
 * `ValueTooLarge`: the value exceeds the algorithmic range for the selected `(J, d)` configuration.
 
+### Feature flags
+
+* `bigint`: enables `lotus_encode_biguint` and arbitrary-precision encoding via `num-bigint`.
+
 ### Value range limits
 
 The maximum encodable value is determined by the `(J, d)` configuration, not by the Rust `u64`
@@ -40,8 +46,3 @@ Most callers will wire the presets into higher-level protocols:
 use lotus::{lotus_encode_u64, lotus_decode_u64, LOTUS_J2D1};
 
 let encoded = lotus_encode_u64(42, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
-let (decoded, _bits) = lotus_decode_u64(&encoded, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
-assert_eq!(decoded, 42);
-```
-
-For streaming applications, reuse a `BitWriter` and feed chunks directly into sockets or files.
