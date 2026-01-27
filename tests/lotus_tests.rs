@@ -61,3 +61,16 @@ fn invalid_inputs() {
     let err = lotus_decode_u64(&[], 2, 1).unwrap_err();
     assert!(matches!(err, LotusError::UnexpectedEof));
 }
+
+#[test]
+fn u64_max_with_deeper_tiers() {
+    let encoded = lotus_encode_u64(u64::MAX, 3, 2).expect("encode max");
+    let (decoded, _) = lotus_decode_u64(&encoded, 3, 2).expect("decode max");
+    assert_eq!(decoded, u64::MAX);
+}
+
+#[test]
+fn value_too_large_for_small_config() {
+    let err = lotus_encode_u64(60, 1, 1).unwrap_err();
+    assert_eq!(err, LotusError::ValueTooLarge);
+}
