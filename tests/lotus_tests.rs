@@ -23,7 +23,7 @@ fn presets_roundtrip() {
 
 #[test]
 fn maximal_edges() {
-    round_trip(u32::MAX as u64, LOTUS_J2D1);
+    round_trip(u32::MAX as u64, LOTUS_J3D1);
     round_trip((1u64 << 40) - 1, LOTUS_J3D1);
 }
 
