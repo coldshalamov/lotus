@@ -83,6 +83,19 @@ Run examples with `cargo run --example <name>`:
 * `configuration_tuning`
 * `vs_varint`
 
+## Configuration tuning
+
+Lotus configurations change the size curve by trading fixed overhead (jumpstarter width `J`) for recursion depth (number of tiers `d`). A short summary:
+
+* **Bigger `J`**: more fixed overhead per value, but larger payload envelopes without adding tiers.
+* **Bigger `d`**: more header recursion overhead, but dramatically larger representable ranges with small `J`.
+
+The modeled sweep in `docs/RESULTS.md` shows how common configurations behave across workloads, and `scripts/config_sweep.py` can be rerun to refresh the table.
+
+## Implementation note
+
+The current Rust reference codec uses a fixed 16-bit payload-length header for simplicity. The `j_bits`/`tiers` parameters are accepted for API compatibility with the tiered format described in the whitepaper, but the configurable tier chain is not yet wired into the encoder/decoder.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Coverage is reported via Codecov and CI runs tests/benches on PRs.

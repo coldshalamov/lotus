@@ -88,6 +88,21 @@ The first field cannot have its length described by a preceding field, because n
 
 So the first component must be fixed-width by specification. That fixed anchor is the jumpstarter.
 
+### **2.1 How a stream of integers stays self-delimiting**
+
+Lotus is defined on bitstrings, but real deployments encode *sequences* of integers. The delimiter is the header itself:
+
+1. Read the jumpstarter (fixed width).
+2. That value selects the width of the first tier.
+3. Each tier is a fixed-width field whose value tells you the width of the next tier.
+4. The final tier tells you the payload width; consume exactly that many payload bits.
+
+At that point the decoder knows the exact boundary of the current integer and can continue reading the next jumpstarter immediately. There is no need for a terminator symbol because the header fully determines the payload length.
+
+### **2.2 Are tier values fixed-width?**
+
+Yes. The *value* in each tier is variable, but the *width* of the tier is fixed once the previous tier is read. This is what makes the chain self-describing without ambiguity: every tier has a predetermined width, and only the final payload width can vary.
+
 ---
 
 ## **3\) The Lotus codec family: parameters and structure**
@@ -431,4 +446,3 @@ Given a target distribution of integers (what your system tends to serialize), c
   * (J=3, d=1)
 
      Both performed similarly in the 32/64-bit uniform tests above.
-

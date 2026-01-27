@@ -7,8 +7,10 @@ The public API intentionally mirrors the mathematical construction from the whit
 * `lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u8>, LotusError>`
   * Encodes a single integer with the provided jumpstarter width and tier count.
   * Returns the minimal byte buffer containing the encoded payload.
+  * **Implementation note:** the current reference encoder uses a fixed 16-bit payload-length header; `j_bits`/`tiers` are reserved for the tiered format in the whitepaper.
 * `lotus_decode_u64(bytes: &[u8], j_bits: usize, tiers: usize) -> Result<(u64, usize), LotusError>`
   * Decodes an integer and returns both the value and the number of bits consumed from `bytes`.
+  * **Implementation note:** `j_bits`/`tiers` are currently unused in the reference decoder.
 * `BitWriter` / `BitReader`
   * Streaming helpers for advanced scenarios such as incremental network framing.
 * Presets
