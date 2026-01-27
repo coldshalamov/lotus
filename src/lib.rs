@@ -104,44 +104,102 @@ impl<'a> BitReader<'a> {
         }
         Ok(value)
     }
-}
 
-/// Encode a single integer as a Lotus payload, returning its width and payload bits.
-fn lotus_payload(value: u64) -> (usize, u64) {
-    let mut width = 1usize;
-    loop {
-        let start = ((1u128 << width) - 2) as u64;
-        let end = ((1u128 << (width + 1)) - 3) as u64;
-        if value <= end {
-            return (width, value - start);
-        }
-        width = (width + 1).min(63);
+    pub fn bits_consumed(&self) -> usize {
+        (self.byte_pos * 8).saturating_sub(self.pending_bits as usize)
     }
 }
 
-/// Encode an unsigned 64-bit integer using a prefix length + Lotus payload.
-pub fn lotus_encode_u64(value: u64, _j_bits: usize, _tiers: usize) -> Result<Vec<u8>, LotusError> {
-    let (payload_width, payload_bits) = lotus_payload(value);
+/// Encode a single integer using Lotus unfolding, returning its payload bits and width.
+fn lotus_encode_value(value: u64) -> Result<(u64, usize), LotusError> {
+    let m = (value as u128) + 1;
+    let mut width = 1usize;
+    loop {
+        let start = (1u128 << width) - 2;
+        let end = (1u128 << (width + 1)) - 3;
+        if m >= start && m <= end {
+            let payload = m - start;
+            return Ok((payload as u64, width));
+        }
+        width += 1;
+        if width > 64 {
+            return Err(LotusError::InvalidEncoding);
+        }
+    }
+}
+
+fn lotus_decode_value(payload: u64, width: usize) -> Result<u64, LotusError> {
+    if width == 0 || width > 64 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let start = (1u128 << width) - 2;
+    let m = (payload as u128) + start;
+    if m == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let value = m - 1;
+    if value > u64::MAX as u128 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    Ok(value as u64)
+}
+
+/// Encode an unsigned 64-bit integer using Lotus tiered headers.
+pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u8>, LotusError> {
+    if !(1..=8).contains(&j_bits) || tiers == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+
+    let (payload_bits, payload_width) = lotus_encode_value(value)?;
+    let mut chain: Vec<(u64, usize)> = vec![(payload_bits, payload_width)];
+    let mut current_width = payload_width;
+
+    for _ in 0..tiers {
+        let (tier_bits, tier_width) = lotus_encode_value(current_width as u64)?;
+        chain.push((tier_bits, tier_width));
+        current_width = tier_width;
+    }
+
+    if current_width == 0 || current_width > (1usize << j_bits) {
+        return Err(LotusError::JumpstarterOverflow);
+    }
+    let jump_val = (current_width - 1) as u64;
+
     let mut writer = BitWriter::new();
-    writer.write_bits(payload_width as u64, 16)?;
-    writer.write_bits(payload_bits, payload_width)?;
+    writer.write_bits(jump_val, j_bits)?;
+    for (bits, width) in chain.iter().rev() {
+        writer.write_bits(*bits, *width)?;
+    }
     Ok(writer.into_bytes())
 }
 
 /// Decode an unsigned 64-bit integer previously encoded with Lotus.
 pub fn lotus_decode_u64(
     bytes: &[u8],
-    _j_bits: usize,
-    _tiers: usize,
+    j_bits: usize,
+    tiers: usize,
 ) -> Result<(u64, usize), LotusError> {
-    let mut reader = BitReader::new(bytes);
-    let payload_width = reader.read_bits(16)? as usize;
-    if payload_width == 0 || payload_width > 63 {
+    if !(1..=8).contains(&j_bits) || tiers == 0 {
         return Err(LotusError::InvalidEncoding);
     }
-    let payload = reader.read_bits(payload_width)?;
-    let start = ((1u128 << payload_width) - 2) as u64;
-    Ok((start + payload, payload_width + 16))
+    let mut reader = BitReader::new(bytes);
+    let start_bits = reader.bits_consumed();
+    let jump_val = reader.read_bits(j_bits)? as usize;
+    let mut next_width = jump_val + 1;
+
+    for _ in 0..tiers {
+        let tier_payload = reader.read_bits(next_width)?;
+        let width_value = lotus_decode_value(tier_payload, next_width)? as usize;
+        if width_value == 0 || width_value > 64 {
+            return Err(LotusError::InvalidEncoding);
+        }
+        next_width = width_value;
+    }
+
+    let payload = reader.read_bits(next_width)?;
+    let value = lotus_decode_value(payload, next_width)?;
+    let total_bits = reader.bits_consumed().saturating_sub(start_bits);
+    Ok((value, total_bits))
 }
 
 /// Preset configuration: Jumpstarter 2 bits, 1 tier.
@@ -183,5 +241,38 @@ mod tests {
             let (decoded, _) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
             assert_eq!(decoded, value);
         }
+    }
+
+    #[test]
+    fn lotus_example_bit_length() {
+        let (j_bits, tiers) = (3, 2);
+        let encoded = lotus_encode_u64(42, j_bits, tiers).unwrap();
+        let (decoded, total_bits) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
+        assert_eq!(decoded, 42);
+        assert_eq!(total_bits, 13);
+    }
+
+    #[test]
+    fn lotus_j2d1_bit_length() {
+        let (j_bits, tiers) = LOTUS_J2D1;
+        let encoded = lotus_encode_u64(42, j_bits, tiers).unwrap();
+        let (decoded, total_bits) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
+        assert_eq!(decoded, 42);
+        assert_eq!(total_bits, 10);
+    }
+
+    #[test]
+    fn max_value_round_trip() {
+        let (j_bits, tiers) = LOTUS_J3D1;
+        let encoded = lotus_encode_u64(u64::MAX, j_bits, tiers).unwrap();
+        let (decoded, _) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
+        assert_eq!(decoded, u64::MAX);
+    }
+
+    #[test]
+    fn empty_decode_returns_eof() {
+        let (j_bits, tiers) = LOTUS_J3D1;
+        let err = lotus_decode_u64(&[], j_bits, tiers).unwrap_err();
+        assert_eq!(err, LotusError::UnexpectedEof);
     }
 }
