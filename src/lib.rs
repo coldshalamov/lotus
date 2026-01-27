@@ -11,6 +11,8 @@ pub enum LotusError {
     UnexpectedEof,
     #[error("invalid lotus encoding")]
     InvalidEncoding,
+    #[error("value exceeds algorithmic range for this (J,d) configuration")]
+    ValueTooLarge,
 }
 
 /// Streaming bit writer that appends to an owned buffer.
@@ -115,31 +117,55 @@ fn lotus_encode_value(value: u64) -> Result<(u64, usize), LotusError> {
     let m = (value as u128) + 1;
     let mut width = 1usize;
     loop {
-        let start = (1u128 << width) - 2;
-        let end = (1u128 << (width + 1)) - 3;
+        let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
+        let start = 1u128
+            .checked_shl(width_u32)
+            .ok_or(LotusError::ValueTooLarge)?
+            .saturating_sub(2);
+        let end = 1u128
+            .checked_shl(width_u32.saturating_add(1))
+            .ok_or(LotusError::ValueTooLarge)?
+            .saturating_sub(3);
         if m >= start && m <= end {
             let payload = m - start;
             return Ok((payload as u64, width));
         }
         width += 1;
-        if width > 64 {
-            return Err(LotusError::InvalidEncoding);
-        }
     }
 }
 
-fn lotus_decode_value(payload: u64, width: usize) -> Result<u64, LotusError> {
-    if width == 0 || width > 64 {
-        return Err(LotusError::InvalidEncoding);
+fn max_width_for_config(j_bits: usize, tiers: usize) -> u128 {
+    let mut max_width = 1u128 << j_bits;
+    for _ in 0..tiers {
+        let shift = match max_width.checked_add(1).and_then(|v| u32::try_from(v).ok()) {
+            Some(value) if value < 128 => value,
+            _ => return u128::MAX,
+        };
+        let base = match 1u128.checked_shl(shift) {
+            Some(value) => value,
+            None => return u128::MAX,
+        };
+        max_width = base.saturating_sub(4);
     }
-    let start = (1u128 << width) - 2;
-    let m = (payload as u128) + start;
+    max_width
+}
+
+fn lotus_decode_value(payload: u64, width: usize) -> Result<u64, LotusError> {
+    if width == 0 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
+    let start = 1u128
+        .checked_shl(width_u32)
+        .ok_or(LotusError::ValueTooLarge)?
+        .saturating_sub(2);
+    let m = (payload as u128).saturating_add(start);
     if m == 0 {
         return Err(LotusError::InvalidEncoding);
     }
     let value = m - 1;
     if value > u64::MAX as u128 {
-        return Err(LotusError::InvalidEncoding);
+        return Err(LotusError::ValueTooLarge);
     }
     Ok(value as u64)
 }
@@ -151,6 +177,10 @@ pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u
     }
 
     let (payload_bits, payload_width) = lotus_encode_value(value)?;
+    let max_width = max_width_for_config(j_bits, tiers);
+    if payload_width as u128 > max_width {
+        return Err(LotusError::ValueTooLarge);
+    }
     let mut chain: Vec<(u64, usize)> = vec![(payload_bits, payload_width)];
     let mut current_width = payload_width;
 
@@ -182,16 +212,20 @@ pub fn lotus_decode_u64(
     if !(1..=8).contains(&j_bits) || tiers == 0 {
         return Err(LotusError::InvalidEncoding);
     }
+    let max_width = max_width_for_config(j_bits, tiers);
     let mut reader = BitReader::new(bytes);
     let start_bits = reader.bits_consumed();
     let jump_val = reader.read_bits(j_bits)? as usize;
     let mut next_width = jump_val + 1;
+    if next_width as u128 > max_width {
+        return Err(LotusError::ValueTooLarge);
+    }
 
     for _ in 0..tiers {
         let tier_payload = reader.read_bits(next_width)?;
         let width_value = lotus_decode_value(tier_payload, next_width)? as usize;
-        if width_value == 0 || width_value > 64 {
-            return Err(LotusError::InvalidEncoding);
+        if width_value == 0 || width_value as u128 > max_width {
+            return Err(LotusError::ValueTooLarge);
         }
         next_width = width_value;
     }

@@ -23,6 +23,14 @@ The `LotusError` enum models all error cases without panicking:
 * `JumpstarterOverflow`: the requested payload width cannot be represented with the chosen jumpstarter.
 * `UnexpectedEof`: the input ran out of bits mid-decode.
 * `InvalidEncoding`: the bit pattern cannot be mapped to a valid Lotus value.
+* `ValueTooLarge`: the value exceeds the algorithmic range for the selected `(J, d)` configuration.
+
+### Value range limits
+
+The maximum encodable value is determined by the `(J, d)` configuration, not by the Rust `u64`
+return type. Each additional tier exponentially expands the describable range; for most
+configurations (`J ≥ 2`, `d ≥ 1`), the algorithmic limit exceeds `u64::MAX`. Values beyond the
+algorithmic range return `LotusError::ValueTooLarge`.
 
 ### Usage pattern
 
