@@ -116,28 +116,6 @@ impl<'a> BitReader<'a> {
     }
 }
 
-/// Encode a single integer using Lotus unfolding, returning its payload bits and width.
-fn lotus_encode_value(value: u64) -> Result<(u64, usize), LotusError> {
-    let m = (value as u128) + 1;
-    let mut width = 1usize;
-    loop {
-        let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
-        let start = 1u128
-            .checked_shl(width_u32)
-            .ok_or(LotusError::ValueTooLarge)?
-            .saturating_sub(2);
-        let end = 1u128
-            .checked_shl(width_u32.saturating_add(1))
-            .ok_or(LotusError::ValueTooLarge)?
-            .saturating_sub(3);
-        if m >= start && m <= end {
-            let payload = m - start;
-            return Ok((payload as u64, width));
-        }
-        width += 1;
-    }
-}
-
 #[cfg(feature = "bigint")]
 fn lotus_encode_value_biguint(value: &BigUint) -> Result<(BigUint, usize), LotusError> {
     let m = value + BigUint::one();
@@ -154,6 +132,78 @@ fn lotus_encode_value_biguint(value: &BigUint) -> Result<(BigUint, usize), Lotus
     }
 }
 
+fn lotus_width_for_value(value: u128) -> Result<usize, LotusError> {
+    let mut width = 1usize;
+    loop {
+        let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
+        let start = 1u128
+            .checked_shl(width_u32)
+            .ok_or(LotusError::ValueTooLarge)?
+            .saturating_sub(2);
+        let end = 1u128
+            .checked_shl(width_u32.saturating_add(1))
+            .ok_or(LotusError::ValueTooLarge)?
+            .saturating_sub(3);
+        if value >= start && value <= end {
+            return Ok(width);
+        }
+        width = width.checked_add(1).ok_or(LotusError::ValueTooLarge)?;
+    }
+}
+
+fn lotus_encode_fixed(value: u128, width: usize) -> Result<u64, LotusError> {
+    if width == 0 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
+    let base = 1u128
+        .checked_shl(width_u32)
+        .ok_or(LotusError::ValueTooLarge)?;
+    let start = base.saturating_sub(2);
+    let payload_max = base.saturating_sub(1);
+    let end = start.saturating_add(payload_max);
+    if value < start || value > end {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let encoded = value - start;
+    if encoded > u64::MAX as u128 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    Ok(encoded as u64)
+}
+
+fn lotus_decode_fixed(payload: u64, width: usize) -> Result<u128, LotusError> {
+    if width == 0 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
+    let base = 1u128
+        .checked_shl(width_u32)
+        .ok_or(LotusError::ValueTooLarge)?;
+    let payload_max = base.saturating_sub(1);
+    let payload_u128 = payload as u128;
+    if payload_u128 > payload_max {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let start = base.saturating_sub(2);
+    let decoded = start.saturating_add(payload_u128);
+    Ok(decoded)
+}
+
+#[cfg(feature = "bigint")]
+fn lotus_encode_fixed_biguint(value: &BigUint, width: usize) -> Result<BigUint, LotusError> {
+    if width == 0 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let start = (BigUint::one() << width) - 2u8;
+    let payload_max = (BigUint::one() << width) - 1u8;
+    let end = &start + &payload_max;
+    if value < &start || value > &end {
+        return Err(LotusError::ValueTooLarge);
+    }
+    Ok(value - start)
+}
+
 fn max_width_for_config(j_bits: usize, tiers: usize) -> u128 {
     let mut max_width = 1u128 << j_bits;
     for _ in 0..tiers {
@@ -168,26 +218,6 @@ fn max_width_for_config(j_bits: usize, tiers: usize) -> u128 {
         max_width = base.saturating_sub(4);
     }
     max_width
-}
-
-fn lotus_decode_value(payload: u64, width: usize) -> Result<u64, LotusError> {
-    if width == 0 {
-        return Err(LotusError::ValueTooLarge);
-    }
-    let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
-    let start = 1u128
-        .checked_shl(width_u32)
-        .ok_or(LotusError::ValueTooLarge)?
-        .saturating_sub(2);
-    let m = (payload as u128).saturating_add(start);
-    if m == 0 {
-        return Err(LotusError::InvalidEncoding);
-    }
-    let value = m - 1;
-    if value > u64::MAX as u128 {
-        return Err(LotusError::ValueTooLarge);
-    }
-    Ok(value as u64)
 }
 
 #[cfg(feature = "bigint")]
@@ -235,7 +265,7 @@ pub fn lotus_encode_biguint(
         return Err(LotusError::InvalidEncoding);
     }
 
-    let (payload_bits, payload_width) = lotus_encode_value_biguint(value)?;
+    let (_payload_bits, payload_width) = lotus_encode_value_biguint(value)?;
     let max_width = max_width_for_config(j_bits, tiers);
     if payload_width as u128 > max_width {
         return Err(LotusError::ValueTooLarge);
@@ -244,8 +274,8 @@ pub fn lotus_encode_biguint(
     let mut current_width = payload_width;
 
     for _ in 0..tiers {
-        let (tier_bits, tier_width) = lotus_encode_value(current_width as u64)?;
-        tier_chain.push((tier_bits, tier_width));
+        let tier_width = lotus_width_for_value(current_width as u128)?;
+        tier_chain.push((current_width as u64, tier_width));
         current_width = tier_width;
     }
 
@@ -256,9 +286,12 @@ pub fn lotus_encode_biguint(
 
     let mut writer = BitWriter::new();
     writer.write_bits(jump_val, j_bits)?;
-    for (bits, width) in tier_chain.iter().rev() {
-        writer.write_bits(*bits, *width)?;
+    for (value, width) in tier_chain.iter().rev() {
+        let encoded = lotus_encode_fixed((*value).into(), *width)?;
+        writer.write_bits(encoded, *width)?;
     }
+    let payload_value = value + BigUint::one();
+    let payload_bits = lotus_encode_fixed_biguint(&payload_value, payload_width)?;
     write_biguint_bits(&mut writer, &payload_bits, payload_width)?;
     Ok(writer.into_bytes())
 }
@@ -269,17 +302,18 @@ pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u
         return Err(LotusError::InvalidEncoding);
     }
 
-    let (payload_bits, payload_width) = lotus_encode_value(value)?;
+    let payload_value = (value as u128).saturating_add(1);
+    let payload_width = lotus_width_for_value(payload_value)?;
     let max_width = max_width_for_config(j_bits, tiers);
     if payload_width as u128 > max_width {
         return Err(LotusError::ValueTooLarge);
     }
-    let mut chain: Vec<(u64, usize)> = vec![(payload_bits, payload_width)];
+    let mut chain: Vec<(u128, usize)> = vec![(payload_value, payload_width)];
     let mut current_width = payload_width;
 
     for _ in 0..tiers {
-        let (tier_bits, tier_width) = lotus_encode_value(current_width as u64)?;
-        chain.push((tier_bits, tier_width));
+        let tier_width = lotus_width_for_value(current_width as u128)?;
+        chain.push((current_width as u128, tier_width));
         current_width = tier_width;
     }
 
@@ -290,8 +324,9 @@ pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u
 
     let mut writer = BitWriter::new();
     writer.write_bits(jump_val, j_bits)?;
-    for (bits, width) in chain.iter().rev() {
-        writer.write_bits(*bits, *width)?;
+    for (value, width) in chain.iter().rev() {
+        let encoded = lotus_encode_fixed(*value, *width)?;
+        writer.write_bits(encoded, *width)?;
     }
     Ok(writer.into_bytes())
 }
@@ -316,17 +351,24 @@ pub fn lotus_decode_u64(
 
     for _ in 0..tiers {
         let tier_payload = reader.read_bits(next_width)?;
-        let width_value = lotus_decode_value(tier_payload, next_width)? as usize;
-        if width_value == 0 || width_value as u128 > max_width {
+        let width_value = lotus_decode_fixed(tier_payload, next_width)?;
+        if width_value == 0 || width_value > max_width {
             return Err(LotusError::ValueTooLarge);
         }
-        next_width = width_value;
+        next_width = usize::try_from(width_value).map_err(|_| LotusError::ValueTooLarge)?;
     }
 
     let payload = reader.read_bits(next_width)?;
-    let value = lotus_decode_value(payload, next_width)?;
+    let m = lotus_decode_fixed(payload, next_width)?;
+    if m == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let value = m - 1;
+    if value > u64::MAX as u128 {
+        return Err(LotusError::ValueTooLarge);
+    }
     let total_bits = reader.bits_consumed().saturating_sub(start_bits);
-    Ok((value, total_bits))
+    Ok((value as u64, total_bits))
 }
 
 /// Preset configuration: Jumpstarter 2 bits, 1 tier.
@@ -376,7 +418,7 @@ mod tests {
         let encoded = lotus_encode_u64(42, j_bits, tiers).unwrap();
         let (decoded, total_bits) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
         assert_eq!(decoded, 42);
-        assert_eq!(total_bits, 13);
+        assert_eq!(total_bits, 12);
     }
 
     #[test]
@@ -385,7 +427,7 @@ mod tests {
         let encoded = lotus_encode_u64(42, j_bits, tiers).unwrap();
         let (decoded, total_bits) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
         assert_eq!(decoded, 42);
-        assert_eq!(total_bits, 10);
+        assert_eq!(total_bits, 9);
     }
 
     #[test]
@@ -401,5 +443,18 @@ mod tests {
         let (j_bits, tiers) = LOTUS_J3D1;
         let err = lotus_decode_u64(&[], j_bits, tiers).unwrap_err();
         assert_eq!(err, LotusError::UnexpectedEof);
+    }
+
+    #[test]
+    fn fixed_width_payloads_are_consecutive() {
+        for width in 1..=12 {
+            let max_payload = 1u64 << width;
+            let mut expected = (1u128 << width).saturating_sub(2);
+            for payload in 0..max_payload {
+                let decoded = lotus_decode_fixed(payload, width).unwrap();
+                assert_eq!(decoded, expected);
+                expected += 1;
+            }
+        }
     }
 }
