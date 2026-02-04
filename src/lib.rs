@@ -169,7 +169,11 @@ fn lotus_encode_fixed(value: u128, width: usize) -> Result<u64, LotusError> {
     if encoded > u64::MAX as u128 {
         return Err(LotusError::ValueTooLarge);
     }
-    Ok(encoded as u64)
+    let payload = encoded as u64;
+    if let Some(limit) = 1u64.checked_shl(width_u32) {
+        debug_assert!(payload < limit);
+    }
+    Ok(payload)
 }
 
 fn lotus_decode_fixed(payload: u64, width: usize) -> Result<u128, LotusError> {
@@ -184,6 +188,9 @@ fn lotus_decode_fixed(payload: u64, width: usize) -> Result<u128, LotusError> {
     let payload_u128 = payload as u128;
     if payload_u128 > payload_max {
         return Err(LotusError::InvalidEncoding);
+    }
+    if let Some(limit) = 1u64.checked_shl(width_u32) {
+        debug_assert!(payload < limit);
     }
     let start = base.saturating_sub(2);
     let decoded = start.saturating_add(payload_u128);
@@ -288,6 +295,9 @@ pub fn lotus_encode_biguint(
     writer.write_bits(jump_val, j_bits)?;
     for (value, width) in tier_chain.iter().rev() {
         let encoded = lotus_encode_fixed((*value).into(), *width)?;
+        if let Some(limit) = 1u64.checked_shl(*width as u32) {
+            debug_assert!(encoded < limit);
+        }
         writer.write_bits(encoded, *width)?;
     }
     let payload_value = value + BigUint::one();
@@ -326,6 +336,9 @@ pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u
     writer.write_bits(jump_val, j_bits)?;
     for (value, width) in chain.iter().rev() {
         let encoded = lotus_encode_fixed(*value, *width)?;
+        if let Some(limit) = 1u64.checked_shl(*width as u32) {
+            debug_assert!(encoded < limit);
+        }
         writer.write_bits(encoded, *width)?;
     }
     Ok(writer.into_bytes())
@@ -456,5 +469,56 @@ mod tests {
                 expected += 1;
             }
         }
+    }
+
+    #[test]
+    fn density_invariant_fixed_width() {
+        for width in 1..=16 {
+            let max_payload = 1u64 << width;
+            let start = (1u128 << width).saturating_sub(2);
+            let mut seen = Vec::with_capacity(max_payload as usize);
+            for payload in 0..max_payload {
+                let decoded = lotus_decode_fixed(payload, width).unwrap();
+                seen.push(decoded);
+            }
+            seen.sort();
+            for (idx, value) in seen.into_iter().enumerate() {
+                assert_eq!(value, start + idx as u128);
+            }
+        }
+    }
+
+    fn leb128_len_u32(mut value: u32) -> usize {
+        let mut bytes = 1;
+        while value >= 0x80 {
+            value >>= 7;
+            bytes += 1;
+        }
+        bytes
+    }
+
+    #[test]
+    fn lotus_beats_leb128_for_uniform_u32_samples() {
+        let (j_bits, tiers) = LOTUS_J1D2;
+        let max_width = max_width_for_config(j_bits, tiers);
+        let max_value = (1u128 << (max_width + 1)).saturating_sub(4);
+        let mut seed: u64 = 0x1234_5678_9abc_def0;
+        let mut lotus_better = 0usize;
+        let samples = 10_000usize;
+        for _ in 0..samples {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let sample = (seed >> 32) as u32;
+            let value = (sample as u128 % (max_value + 1)) as u32;
+            let encoded = lotus_encode_u64(value as u64, j_bits, tiers).unwrap();
+            let (_, lotus_bits) = lotus_decode_u64(&encoded, j_bits, tiers).unwrap();
+            let leb_bits = leb128_len_u32(value) * 8;
+            if lotus_bits < leb_bits {
+                lotus_better += 1;
+            }
+        }
+        assert!(
+            lotus_better > samples / 2,
+            "Lotus should beat LEB128 more often than not"
+        );
     }
 }
