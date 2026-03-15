@@ -1,8 +1,11 @@
-use lotus::{LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, LotusError, lotus_decode_u64, lotus_encode_u64};
 #[cfg(feature = "bigint")]
 use lotus::lotus_encode_biguint;
-use rand::{Rng, SeedableRng};
+use lotus::{
+    LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, LotusError, lotus_decode_u64, lotus_encode_u64,
+    lotus_encode_u64_framed,
+};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 fn leb128_encode(mut value: u64) -> Vec<u8> {
     let mut out = Vec::new();
@@ -127,6 +130,22 @@ fn lotus_j3d1_beats_leb128_uniform_u64() {
 fn invalid_inputs() {
     let err = lotus_decode_u64(&[], 2, 1).unwrap_err();
     assert!(matches!(err, LotusError::UnexpectedEof));
+}
+
+#[test]
+fn framed_round_trip_reports_same_bit_length_as_decoder() {
+    let framed = lotus_encode_u64_framed(1_000_000, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+    let (decoded, consumed) = lotus_decode_u64(&framed.bytes, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+    assert_eq!(decoded, 1_000_000);
+    assert_eq!(consumed, framed.bit_len);
+}
+
+#[test]
+fn decode_fails_when_input_truncated() {
+    let encoded = lotus_encode_u64(u64::MAX, LOTUS_J3D1.0, LOTUS_J3D1.1).unwrap();
+    let truncated = &encoded[..encoded.len() - 1];
+    let err = lotus_decode_u64(truncated, LOTUS_J3D1.0, LOTUS_J3D1.1).unwrap_err();
+    assert_eq!(err, LotusError::UnexpectedEof);
 }
 
 #[test]

@@ -1,48 +1,47 @@
 # Lotus Rust API
 
-The public API intentionally mirrors the mathematical construction from the whitepaper while keeping Rust ergonomics front and center.
+## Core encode/decode
 
-## Library layout
+- `lotus_encode_u64(value, j_bits, tiers) -> Result<Vec<u8>, LotusError>`
+  - Backward-compatible convenience API.
+  - Returns bytes only.
 
-* `lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u8>, LotusError>`
-  * Encodes a single integer with the provided jumpstarter width and tier count.
-  * Returns the minimal byte buffer containing the encoded payload.
-* `lotus_decode_u64(bytes: &[u8], j_bits: usize, tiers: usize) -> Result<(u64, usize), LotusError>`
-  * Decodes an integer and returns both the value and the number of bits consumed from `bytes`.
-* `lotus_encode_biguint(value: &BigUint, j_bits: usize, tiers: usize) -> Result<Vec<u8>, LotusError>`
-  * Encodes an arbitrary-precision integer when the `bigint` feature is enabled.
-* `BitWriter` / `BitReader`
-  * Streaming helpers for advanced scenarios such as incremental network framing.
-* Presets
-  * `LOTUS_J2D1`, `LOTUS_J1D2`, `LOTUS_J3D1` provide tuned defaults evaluated in the whitepaper.
-* Feature flags
-  * `small-int-fastpath` keeps single-byte encodings for very small integers before falling back to Lotus.
+- `lotus_encode_u64_framed(value, j_bits, tiers) -> Result<EncodedLotus, LotusError>`
+  - Preferred API for stream/framing code.
+  - Returns:
+    - `bytes`: packed MSB-first bitstream
+    - `bit_len`: exact number of meaningful bits
 
-### Error handling
+- `lotus_decode_u64(bytes, j_bits, tiers) -> Result<(u64, usize), LotusError>`
+  - Returns decoded value plus consumed bits.
 
-The `LotusError` enum models all error cases without panicking:
+## Bit-level framing semantics
 
-* `JumpstarterOverflow`: the requested payload width cannot be represented with the chosen jumpstarter.
-* `UnexpectedEof`: the input ran out of bits mid-decode.
-* `InvalidEncoding`: the bit pattern cannot be mapped to a valid Lotus value.
-* `ValueTooLarge`: the value exceeds the algorithmic range for the selected `(J, d)` configuration.
+Lotus is bit-oriented, not byte-oriented:
 
-### Feature flags
+- Final encoded byte may include trailing zero padding bits.
+- `EncodedLotus.bit_len` (or decode's consumed bits) is authoritative for framing.
+- Extra trailing bytes are ignored by single-value decode unless your protocol forbids them.
 
-* `bigint`: enables `lotus_encode_biguint` and arbitrary-precision encoding via `num-bigint`.
+For multi-value streams, delimit using the returned/recorded bit lengths.
 
-### Value range limits
+## Errors
 
-The maximum encodable value is determined by the `(J, d)` configuration, not by the Rust `u64`
-return type. Each additional tier exponentially expands the describable range; for most
-configurations (`J ≥ 2`, `d ≥ 1`), the algorithmic limit exceeds `u64::MAX`. Values beyond the
-algorithmic range return `LotusError::ValueTooLarge`.
+`LotusError` variants:
 
-### Usage pattern
+- `JumpstarterOverflow`
+- `UnexpectedEof`
+- `InvalidEncoding`
+- `ValueTooLarge`
 
-Most callers will wire the presets into higher-level protocols:
+## Features
 
-```rust
-use lotus::{lotus_encode_u64, lotus_decode_u64, LOTUS_J2D1};
+- `small-int-fastpath`: internal optimization surface (non-default).
+- `bigint`: enables `lotus_encode_biguint`.
+- `cli`: enables the `lotus` binary and CLI-only dependencies (`clap`, `hex`, `serde`, `serde_json`).
 
-let encoded = lotus_encode_u64(42, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
+## Presets
+
+- `LOTUS_J2D1`
+- `LOTUS_J1D2`
+- `LOTUS_J3D1`

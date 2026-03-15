@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
-use thiserror::Error;
+pub mod metrics;
+
 #[cfg(feature = "bigint")]
 use num_bigint::BigUint;
 #[cfg(feature = "bigint")]
 use num_traits::One;
+use thiserror::Error;
 
 /// Errors emitted by Lotus codecs.
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -17,6 +19,18 @@ pub enum LotusError {
     InvalidEncoding,
     #[error("value exceeds algorithmic range for this (J,d) configuration")]
     ValueTooLarge,
+}
+
+/// Encoded Lotus payload with explicit framing metadata.
+///
+/// Lotus encodings are bit-oriented: the final byte may include trailing zero padding bits.
+/// `bit_len` records the exact number of meaningful bits to read from `bytes`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodedLotus {
+    /// Backing byte buffer containing the encoded bits (MSB-first).
+    pub bytes: Vec<u8>,
+    /// Number of meaningful bits in `bytes`.
+    pub bit_len: usize,
 }
 
 /// Streaming bit writer that appends to an owned buffer.
@@ -37,6 +51,10 @@ impl BitWriter {
             self.buffer.push(self.pending << (8 - self.pending_bits));
         }
         self.buffer
+    }
+
+    pub fn bits_written(&self) -> usize {
+        self.buffer.len() * 8 + self.pending_bits as usize
     }
 
     pub fn write_bits(&mut self, value: u64, mut width: usize) -> Result<(), LotusError> {
@@ -308,6 +326,15 @@ pub fn lotus_encode_biguint(
 
 /// Encode an unsigned 64-bit integer using Lotus tiered headers.
 pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u8>, LotusError> {
+    Ok(lotus_encode_u64_framed(value, j_bits, tiers)?.bytes)
+}
+
+/// Encode an unsigned 64-bit integer and return exact bit length metadata.
+pub fn lotus_encode_u64_framed(
+    value: u64,
+    j_bits: usize,
+    tiers: usize,
+) -> Result<EncodedLotus, LotusError> {
     if !(1..=8).contains(&j_bits) || tiers == 0 {
         return Err(LotusError::InvalidEncoding);
     }
@@ -341,7 +368,11 @@ pub fn lotus_encode_u64(value: u64, j_bits: usize, tiers: usize) -> Result<Vec<u
         }
         writer.write_bits(encoded, *width)?;
     }
-    Ok(writer.into_bytes())
+    let bit_len = writer.bits_written();
+    Ok(EncodedLotus {
+        bytes: writer.into_bytes(),
+        bit_len,
+    })
 }
 
 /// Decode an unsigned 64-bit integer previously encoded with Lotus.
@@ -390,15 +421,6 @@ pub const LOTUS_J2D1: (usize, usize) = (2, 1);
 pub const LOTUS_J1D2: (usize, usize) = (1, 2);
 /// Preset configuration: Jumpstarter 3 bits, 1 tier.
 pub const LOTUS_J3D1: (usize, usize) = (3, 1);
-
-#[cfg(feature = "small-int-fastpath")]
-pub fn lotus_encode_small(value: u64) -> Result<Vec<u8>, LotusError> {
-    if value < 128 {
-        Ok(vec![value as u8])
-    } else {
-        lotus_encode_u64(value, LOTUS_J2D1.0, LOTUS_J2D1.1)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -456,6 +478,37 @@ mod tests {
         let (j_bits, tiers) = LOTUS_J3D1;
         let err = lotus_decode_u64(&[], j_bits, tiers).unwrap_err();
         assert_eq!(err, LotusError::UnexpectedEof);
+    }
+
+    #[test]
+    fn framed_api_reports_exact_bits() {
+        let framed = lotus_encode_u64_framed(42, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+        assert_eq!(framed.bit_len, 9);
+        let (value, consumed) =
+            lotus_decode_u64(&framed.bytes, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+        assert_eq!(value, 42);
+        assert_eq!(consumed, framed.bit_len);
+    }
+
+    #[test]
+    fn decode_rejects_truncated_payload() {
+        let encoded = lotus_encode_u64(4096, LOTUS_J3D1.0, LOTUS_J3D1.1).unwrap();
+        for i in 0..encoded.len() {
+            let truncated = &encoded[..i];
+            let err = lotus_decode_u64(truncated, LOTUS_J3D1.0, LOTUS_J3D1.1).unwrap_err();
+            assert_eq!(err, LotusError::UnexpectedEof);
+        }
+    }
+
+    #[test]
+    fn decode_ignores_trailing_padding_bits() {
+        let encoded = lotus_encode_u64(127, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+        let mut extended = encoded.clone();
+        extended.push(0xff);
+        let (decoded_a, bits_a) = lotus_decode_u64(&encoded, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+        let (decoded_b, bits_b) = lotus_decode_u64(&extended, LOTUS_J2D1.0, LOTUS_J2D1.1).unwrap();
+        assert_eq!(decoded_a, decoded_b);
+        assert_eq!(bits_a, bits_b);
     }
 
     #[test]
