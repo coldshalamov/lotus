@@ -1,30 +1,17 @@
 # Lotus 🪷
 
-[![Build](https://img.shields.io/github/actions/workflow/status/example/lotus/ci.yml?branch=main)](https://github.com/example/lotus/actions)
+[![CI](https://github.com/lotus-codec/lotus/actions/workflows/ci.yml/badge.svg)](https://github.com/lotus-codec/lotus/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/lotus.svg)](https://crates.io/crates/lotus)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![docs.rs](https://docs.rs/lotus/badge.svg)](https://docs.rs/lotus)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Lotus is a parametric, density-reclaiming integer codec for Rust that turns wasted alias space into real payload capacity.
+Lotus is a parametric bit-level integer codec for Rust. It reclaims representational density by mapping every fixed-width bitstring into contiguous integer ranges, then restores self-delimiting behavior using a bounded tier chain and jumpstarter.
 
-## Why Lotus?
+## Project status
 
-Byte-quantized varints and unary-style universal codes leave code space on the table. Lotus unfolds the binary tree so every distinct bitstring is used, then caps the result with a tiny tiered header anchored by a fixed-width jumpstarter. The result is a smooth, dense curve that stays prefix-decodable across massive ranges.
+This crate is **experimental** and actively hardened for reproducibility and correctness. Public APIs are small and documented, and benchmark claims are generated from code in this repository.
 
-## Quick comparison
-
-| workload | Lotus J2D1 (bits/value) | LEB128 (bytes/value) | Elias Delta (bits/value) |
-|---|---|---|---|
-| Small (0-255) | 7.10 | 1.10 | 10.2 |
-| Medium (0-1M) | 14.20 | 2.70 | 17.5 |
-| Large32 | 25.00 | 5.10 | 30.0 |
-
-See full methodology in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
-
-![Benchmark snapshot](docs/images/performance.svg)
-
-## Installation
-
-Library:
+## Install
 
 ```bash
 cargo add lotus
@@ -33,56 +20,53 @@ cargo add lotus
 CLI:
 
 ```bash
-cargo install --path .
+cargo install --path . --features cli
 ```
 
-## Usage
-
-Library quick start:
+## Library quick start
 
 ```rust
-use lotus::{lotus_encode_u64, lotus_decode_u64, LOTUS_J2D1};
+use lotus::{lotus_decode_u64, lotus_encode_u64_framed, LOTUS_J2D1};
 
-let encoded = lotus_encode_u64(42, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
-let (decoded, _bits) = lotus_decode_u64(&encoded, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
-assert_eq!(decoded, 42);
+let encoded = lotus_encode_u64_framed(42, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
+assert_eq!(encoded.bit_len, 9);
+
+let (value, consumed_bits) = lotus_decode_u64(&encoded.bytes, LOTUS_J2D1.0, LOTUS_J2D1.1)?;
+assert_eq!(value, 42);
+assert_eq!(consumed_bits, encoded.bit_len);
+# Ok::<(), lotus::LotusError>(())
 ```
 
-CLI encoding/decoding:
+## CLI examples
 
 ```bash
-echo 42 | lotus encode --jumpstarter 2 --tiers 1 | lotus decode --jumpstarter 2 --tiers 1
+printf '42\n' | lotus encode --jumpstarter 2 --tiers 1 --with-bits
+printf '2a\n' | lotus decode --jumpstarter 2 --tiers 1 --with-bits
 ```
 
-Benchmarks:
+Generate deterministic benchmark-size artifacts used in docs:
 
 ```bash
-lotus benchmark
+scripts/reproduce_paper.sh
 ```
 
-## Current status
+## Benchmark evidence policy
 
-Experimental research implementation with production-oriented ergonomics. APIs are stabilizing; performance work and fuzzing are ongoing.
+- Runtime throughput is measured by Criterion (`cargo bench --bench comparison`).
+- Size tables in docs are generated from deterministic workload code (`src/metrics.rs`) and committed artifacts (`docs/RESULTS.md`, `docs/results.json`).
+- No hand-written benchmark snapshot tables are accepted.
 
-## Resources
+See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and [`docs/RESULTS.md`](docs/RESULTS.md).
 
-* [WHITEPAPER](docs/WHITEPAPER.md)
-* [THEORY](docs/THEORY.md)
-* [API](docs/API.md)
-* [BENCHMARKS](docs/BENCHMARKS.md)
-* [GitHub Pages demo](docs/index.html)
+## Documentation
 
-![Overhead chart](docs/images/overhead.svg)
-
-## Examples
-
-Run examples with `cargo run --example <name>`:
-
-* `basic_usage`
-* `streaming`
-* `configuration_tuning`
-* `vs_varint`
+- [API guide](docs/API.md)
+- [Theory](docs/THEORY.md)
+- [Benchmarks](docs/BENCHMARKS.md)
+- [Results (generated)](docs/RESULTS.md)
+- [Maintainer audit](docs/AUDIT.md)
+- [Whitepaper notes](docs/WHITEPAPER.md)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Coverage is reported via Codecov and CI runs tests/benches on PRs.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Run `cargo fmt`, `cargo clippy`, `cargo test`, and `scripts/check_generated.sh` before opening a PR.

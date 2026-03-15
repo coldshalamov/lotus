@@ -2,26 +2,30 @@
 name = "lotus"
 version = "0.1.0"
 edition = "2024"
-authors = ["Lotus Authors <dev@lotus-codec.dev>"]
-description = "Lotus: a parametric density-reclaiming integer codec with tiered self-delimiting headers"
+authors = ["Lotus maintainers"]
+description = "Parametric bit-level integer codec with tiered self-delimiting headers"
 license = "Apache-2.0"
-repository = "https://github.com/example/lotus"
-homepage = "https://example.github.io/lotus"
-documentation = "https://example.github.io/lotus/docs"
-keywords = ["codec", "compression", "integer", "bitstream", "rust"]
-categories = ["compression", "data-structures", "encoding"]
+repository = "https://github.com/lotus-codec/lotus"
+homepage = "https://github.com/lotus-codec/lotus"
+documentation = "https://docs.rs/lotus"
+keywords = ["codec", "compression", "integer", "bitstream", "varint"]
+categories = ["compression", "encoding"]
 readme = "README.md"
+rust-version = "1.85"
 
 [features]
-default = ["small-int-fastpath", "bigint"]
+default = []
 small-int-fastpath = []
 bigint = ["dep:num-bigint", "dep:num-traits"]
+cli = ["dep:clap", "dep:hex", "dep:serde", "dep:serde_json"]
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 num-bigint = { version = "0.4", optional = true }
 num-traits = { version = "0.2", optional = true }
-hex = "0.4"
+hex = { version = "0.4", optional = true }
 thiserror = "1.0"
 
 [dev-dependencies]
@@ -32,6 +36,11 @@ rand = "0.8"
 [[bench]]
 name = "comparison"
 harness = false
+
+[[bin]]
+name = "lotus"
+path = "src/bin/lotus.rs"
+required-features = ["cli"]
 
 [profile.release]
 lto = true

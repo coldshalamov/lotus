@@ -1,33 +1,63 @@
-use clap::{Parser, Subcommand};
-use lotus::{LOTUS_J2D1, LotusError, lotus_decode_u64, lotus_encode_u64};
+use clap::{Parser, Subcommand, ValueEnum};
+use lotus::metrics::{SizeSummary, standard_workloads, summarize_sizes};
+use lotus::{LotusError, lotus_decode_u64, lotus_encode_u64_framed};
+use serde::Serialize;
+use std::fs;
 use std::io::{self, Read};
-use std::time::Instant;
 
 #[derive(Parser)]
-#[command(author, version, about = "Lotus integer codec CLI", long_about = None)]
+#[command(author, version, about = "Lotus integer codec CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum OutputFormat {
+    Csv,
+    Json,
+    Markdown,
+}
+
 #[derive(Subcommand)]
 enum Command {
-    /// Encode integers read from stdin (one per line)
+    /// Encode integers read from stdin (one decimal u64 per line)
     Encode {
         #[arg(short, long, default_value_t = 2)]
         jumpstarter: usize,
         #[arg(short, long, default_value_t = 1)]
         tiers: usize,
+        /// Prefix each output line with consumed bit length
+        #[arg(long)]
+        with_bits: bool,
     },
-    /// Decode a hex-encoded Lotus payload from stdin
+    /// Decode hex-encoded Lotus payloads from stdin (one payload per line)
     Decode {
         #[arg(short, long, default_value_t = 2)]
         jumpstarter: usize,
         #[arg(short, long, default_value_t = 1)]
         tiers: usize,
+        /// Print consumed bit length after each value
+        #[arg(long)]
+        with_bits: bool,
     },
-    /// Run a micro-benchmark against LEB128 and Elias Delta
-    Benchmark {},
+    /// Compute deterministic size summaries used in docs/RESULTS.md
+    Benchmark {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
+        format: OutputFormat,
+        /// Write output to a file (prints to stdout when omitted)
+        #[arg(long)]
+        output: Option<String>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+struct SerializableSummary<'a> {
+    workload: &'a str,
+    lotus_j2d1_bits_per_value: Option<f64>,
+    lotus_j3d1_bits_per_value: Option<f64>,
+    leb128_bits_per_value: f64,
+    elias_delta_bits_per_value: f64,
 }
 
 fn read_stdin_to_string() -> io::Result<String> {
@@ -36,92 +66,109 @@ fn read_stdin_to_string() -> io::Result<String> {
     Ok(input)
 }
 
-fn encode_mode(j: usize, d: usize) -> Result<(), LotusError> {
-    let input = read_stdin_to_string().map_err(|_| LotusError::UnexpectedEof)?;
-    for line in input.lines() {
-        let value: u64 = line
-            .trim()
-            .parse()
-            .map_err(|_| LotusError::InvalidEncoding)?;
-        let encoded = lotus_encode_u64(value, j, d)?;
-        println!("{}", hex::encode(encoded));
-    }
-    Ok(())
+fn parse_u64_line(line: &str) -> Result<u64, LotusError> {
+    line.trim().parse().map_err(|_| LotusError::InvalidEncoding)
 }
 
-fn decode_mode(j: usize, d: usize) -> Result<(), LotusError> {
+fn encode_mode(j: usize, d: usize, with_bits: bool) -> Result<(), LotusError> {
     let input = read_stdin_to_string().map_err(|_| LotusError::UnexpectedEof)?;
-    for line in input.lines() {
-        let bytes = hex::decode(line.trim()).map_err(|_| LotusError::InvalidEncoding)?;
-        let (value, _bits) = lotus_decode_u64(&bytes, j, d)?;
-        println!("{}", value);
-    }
-    Ok(())
-}
-
-fn leb128_encode(mut value: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-            out.push(byte);
+    for line in input.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let value = parse_u64_line(line)?;
+        let encoded = lotus_encode_u64_framed(value, j, d)?;
+        if with_bits {
+            println!("{} {}", encoded.bit_len, hex::encode(encoded.bytes));
         } else {
-            out.push(byte);
-            break;
+            println!("{}", hex::encode(encoded.bytes));
         }
+    }
+    Ok(())
+}
+
+fn decode_mode(j: usize, d: usize, with_bits: bool) -> Result<(), LotusError> {
+    let input = read_stdin_to_string().map_err(|_| LotusError::UnexpectedEof)?;
+    for line in input.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let bytes = hex::decode(line).map_err(|_| LotusError::InvalidEncoding)?;
+        let (value, bits) = lotus_decode_u64(&bytes, j, d)?;
+        if with_bits {
+            println!("{} {}", value, bits);
+        } else {
+            println!("{}", value);
+        }
+    }
+    Ok(())
+}
+
+fn as_json_rows(summaries: &[SizeSummary]) -> Vec<SerializableSummary<'_>> {
+    summaries
+        .iter()
+        .map(|s| SerializableSummary {
+            workload: s.workload,
+            lotus_j2d1_bits_per_value: s.lotus_j2d1_bits,
+            lotus_j3d1_bits_per_value: s.lotus_j3d1_bits,
+            leb128_bits_per_value: s.leb128_bits,
+            elias_delta_bits_per_value: s.elias_delta_bits,
+        })
+        .collect()
+}
+
+fn render_csv(summaries: &[SizeSummary]) -> String {
+    let mut out = String::from(
+        "workload,lotus_j2d1_bits_per_value,lotus_j3d1_bits_per_value,leb128_bits_per_value,elias_delta_bits_per_value\n",
+    );
+    for s in summaries {
+        out.push_str(&format!(
+            "{},{},{},{:.4},{:.4}\n",
+            s.workload,
+            s.lotus_j2d1_bits
+                .map(|v| format!("{v:.4}"))
+                .unwrap_or_else(|| "NA".to_string()),
+            s.lotus_j3d1_bits
+                .map(|v| format!("{v:.4}"))
+                .unwrap_or_else(|| "NA".to_string()),
+            s.leb128_bits,
+            s.elias_delta_bits
+        ));
     }
     out
 }
 
-fn elias_delta_len(value: u64) -> usize {
-    let mut len = 1;
-    let mut bits = 64 - value.leading_zeros() as usize;
-    while bits > 1 {
-        len += bits;
-        bits = 64 - (bits as u64).leading_zeros() as usize;
+fn render_markdown(summaries: &[SizeSummary]) -> String {
+    let mut out = String::new();
+    out.push_str("# Benchmark results\n\n");
+    out.push_str("This file is generated by `scripts/reproduce_paper.sh`, which invokes `cargo run --features cli --bin lotus -- benchmark --format markdown --output docs/RESULTS.md`.\n\n");
+    out.push_str("Numbers are deterministic size statistics for repository workloads (not runtime throughput).\n\n");
+    out.push_str("| workload | lotus J2D1 (bits/value) | lotus J3D1 (bits/value) | LEB128 (bits/value) | Elias Delta (bits/value) |\n");
+    out.push_str("|---|---:|---:|---:|---:|\n");
+    for s in summaries {
+        out.push_str(&format!(
+            "| {} | {} | {} | {:.4} | {:.4} |\n",
+            s.workload,
+            s.lotus_j2d1_bits
+                .map(|v| format!("{v:.4}"))
+                .unwrap_or_else(|| "NA (out of range)".to_string()),
+            s.lotus_j3d1_bits
+                .map(|v| format!("{v:.4}"))
+                .unwrap_or_else(|| "NA (out of range)".to_string()),
+            s.leb128_bits,
+            s.elias_delta_bits
+        ));
     }
-    len
+    out
 }
 
-fn run_benchmark() -> Result<(), LotusError> {
-    let workloads = vec![
-        ("small", (0u64..=255).collect::<Vec<_>>()),
-        (
-            "medium",
-            (0u64..=1_000_000).step_by(10_000).collect::<Vec<_>>(),
-        ),
-        (
-            "large32",
-            (0u64..=4_000_000_000)
-                .step_by(25_000_000)
-                .collect::<Vec<_>>(),
-        ),
-    ];
-    println!("workload,lotus(bits/value),leb128(bytes/value),elias_delta(bits/value)");
-    for (name, values) in workloads {
-        let start = Instant::now();
-        let lotus_bits: usize = values
-            .iter()
-            .map(|v| {
-                lotus_encode_u64(*v, LOTUS_J2D1.0, LOTUS_J2D1.1)
-                    .unwrap()
-                    .len()
-                    * 8
-            })
-            .sum();
-        let lotus_elapsed = start.elapsed();
-        let leb_bytes: usize = values.iter().map(|v| leb128_encode(*v).len()).sum();
-        let elias_bits: usize = values.iter().map(|v| elias_delta_len(*v)).sum();
-        let n = values.len();
-        println!(
-            "{name},{:.2},{:.2},{:.2} ({:?} encode)",
-            lotus_bits as f64 / n as f64,
-            leb_bytes as f64 / n as f64,
-            elias_bits as f64 / n as f64,
-            lotus_elapsed
-        );
+fn run_benchmark(format: OutputFormat, output: Option<String>) -> Result<(), LotusError> {
+    let summaries = summarize_sizes(&standard_workloads());
+    let rendered = match format {
+        OutputFormat::Csv => render_csv(&summaries),
+        OutputFormat::Json => serde_json::to_string_pretty(&as_json_rows(&summaries))
+            .map_err(|_| LotusError::InvalidEncoding)?,
+        OutputFormat::Markdown => render_markdown(&summaries),
+    };
+
+    if let Some(path) = output {
+        fs::write(path, rendered).map_err(|_| LotusError::UnexpectedEof)?;
+    } else {
+        println!("{rendered}");
     }
     Ok(())
 }
@@ -129,8 +176,16 @@ fn run_benchmark() -> Result<(), LotusError> {
 fn main() -> Result<(), LotusError> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Encode { jumpstarter, tiers } => encode_mode(jumpstarter, tiers),
-        Command::Decode { jumpstarter, tiers } => decode_mode(jumpstarter, tiers),
-        Command::Benchmark {} => run_benchmark(),
+        Command::Encode {
+            jumpstarter,
+            tiers,
+            with_bits,
+        } => encode_mode(jumpstarter, tiers, with_bits),
+        Command::Decode {
+            jumpstarter,
+            tiers,
+            with_bits,
+        } => decode_mode(jumpstarter, tiers, with_bits),
+        Command::Benchmark { format, output } => run_benchmark(format, output),
     }
 }

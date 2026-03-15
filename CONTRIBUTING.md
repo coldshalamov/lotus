@@ -1,11 +1,29 @@
 # Contributing to Lotus
 
-Thanks for considering contributions! Even though Lotus began as a research prototype, the goal is a production-grade codec. To keep changes smooth:
+Thanks for contributing.
 
-1. Fork and open a pull request describing the motivation.
-2. Add tests for new behaviors and run `cargo fmt`, `cargo clippy`, and `cargo test`.
-3. For performance work, attach Criterion output or `scripts/reproduce_paper.sh` results.
-4. Keep the public API surface minimal and avoid adding `unsafe` blocks.
-5. Use `LotusError` for recoverable errors instead of panicking.
+## Required checks before PR
 
-For discussions about new variants or real-world usage, please open a GitHub Discussion so we can track design notes.
+```bash
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo test --all-features
+scripts/check_generated.sh
+```
+
+If you changed benchmark workloads or benchmark-report formatting, include regenerated:
+
+- `docs/RESULTS.md`
+- `docs/results.json`
+
+## Benchmark claim policy
+
+Do not hand-edit benchmark result tables presented as measured output.
+All benchmark-size claims must come from generated artifacts.
+
+## Design policy
+
+- Preserve Lotus mapping/invariants unless correctness evidence requires changes.
+- Prefer explicit framing (`bit_len`) in external protocol examples.
+- Keep the core library free of unnecessary CLI dependencies.
