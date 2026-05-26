@@ -107,6 +107,9 @@ impl<'a> BitReader<'a> {
     }
 
     pub fn read_bits(&mut self, mut width: usize) -> Result<u64, LotusError> {
+        if width > u64::BITS as usize {
+            return Err(LotusError::ValueTooLarge);
+        }
         let mut value = 0u64;
         while width > 0 {
             if self.pending_bits == 0 {
@@ -598,6 +601,12 @@ mod tests {
         let (j_bits, tiers) = LOTUS_J3D1;
         let err = lotus_decode_u64(&[], j_bits, tiers).unwrap_err();
         assert_eq!(err, LotusError::UnexpectedEof);
+    }
+
+    #[test]
+    fn malformed_large_width_decode_returns_error() {
+        let err = lotus_decode_u64(&[0xff; 16], 3, 2).unwrap_err();
+        assert_eq!(err, LotusError::ValueTooLarge);
     }
 
     #[test]
