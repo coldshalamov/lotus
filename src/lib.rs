@@ -415,6 +415,126 @@ pub fn lotus_decode_u64(
     Ok((value as u64, total_bits))
 }
 
+/// Compute the exact bit length of `lotus_encode_u64(value, j_bits, tiers)`
+/// without performing the encoding. Pure arithmetic — no allocations.
+pub fn lotus_encoded_bit_len(value: u64, j_bits: usize, tiers: usize) -> Result<usize, LotusError> {
+    if !(1..=8).contains(&j_bits) || tiers == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+
+    let payload_value = (value as u128).saturating_add(1);
+    let payload_width = lotus_width_for_value(payload_value)?;
+    let max_width = max_width_for_config(j_bits, tiers);
+    if payload_width as u128 > max_width {
+        return Err(LotusError::ValueTooLarge);
+    }
+
+    let mut total_tier_width = 0usize;
+    let mut current_width = payload_width;
+    for _ in 0..tiers {
+        let tier_width = lotus_width_for_value(current_width as u128)?;
+        total_tier_width = total_tier_width
+            .checked_add(tier_width)
+            .ok_or(LotusError::ValueTooLarge)?;
+        current_width = tier_width;
+    }
+
+    if current_width == 0 || current_width > (1usize << j_bits) {
+        return Err(LotusError::JumpstarterOverflow);
+    }
+
+    let total = j_bits
+        .checked_add(total_tier_width)
+        .and_then(|v| v.checked_add(payload_width))
+        .ok_or(LotusError::ValueTooLarge)?;
+    Ok(total)
+}
+
+/// Encode `value` into an existing `BitWriter`. Returns bits written.
+/// Zero allocation aside from any growth the writer's internal buffer needs.
+pub fn lotus_encode_into_writer(
+    value: u64,
+    j_bits: usize,
+    tiers: usize,
+    writer: &mut BitWriter,
+) -> Result<usize, LotusError> {
+    if !(1..=8).contains(&j_bits) || tiers == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+
+    let bits_before = writer.bits_written();
+
+    let payload_value = (value as u128).saturating_add(1);
+    let payload_width = lotus_width_for_value(payload_value)?;
+    let max_width = max_width_for_config(j_bits, tiers);
+    if payload_width as u128 > max_width {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let mut chain: Vec<(u128, usize)> = vec![(payload_value, payload_width)];
+    let mut current_width = payload_width;
+
+    for _ in 0..tiers {
+        let tier_width = lotus_width_for_value(current_width as u128)?;
+        chain.push((current_width as u128, tier_width));
+        current_width = tier_width;
+    }
+
+    if current_width == 0 || current_width > (1usize << j_bits) {
+        return Err(LotusError::JumpstarterOverflow);
+    }
+    let jump_val = (current_width - 1) as u64;
+
+    writer.write_bits(jump_val, j_bits)?;
+    for (value, width) in chain.iter().rev() {
+        let encoded = lotus_encode_fixed(*value, *width)?;
+        if let Some(limit) = 1u64.checked_shl(*width as u32) {
+            debug_assert!(encoded < limit);
+        }
+        writer.write_bits(encoded, *width)?;
+    }
+
+    Ok(writer.bits_written() - bits_before)
+}
+
+/// Decode a value from an existing `BitReader`. Returns `(value, bits_consumed)`.
+pub fn lotus_decode_from_reader(
+    reader: &mut BitReader<'_>,
+    j_bits: usize,
+    tiers: usize,
+) -> Result<(u64, usize), LotusError> {
+    if !(1..=8).contains(&j_bits) || tiers == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let max_width = max_width_for_config(j_bits, tiers);
+    let start_bits = reader.bits_consumed();
+    let jump_val = reader.read_bits(j_bits)? as usize;
+    let mut next_width = jump_val + 1;
+    if next_width as u128 > max_width {
+        return Err(LotusError::ValueTooLarge);
+    }
+
+    for _ in 0..tiers {
+        let tier_payload = reader.read_bits(next_width)?;
+        let width_value = lotus_decode_fixed(tier_payload, next_width)?;
+        if width_value == 0 || width_value > max_width {
+            return Err(LotusError::ValueTooLarge);
+        }
+        next_width = usize::try_from(width_value).map_err(|_| LotusError::ValueTooLarge)?;
+    }
+
+    let payload = reader.read_bits(next_width)?;
+    let m = lotus_decode_fixed(payload, next_width)?;
+    if m == 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    let value = m - 1;
+    if value > u64::MAX as u128 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    let total_bits = reader.bits_consumed().saturating_sub(start_bits);
+    Ok((value as u64, total_bits))
+}
+
 /// Preset configuration: Jumpstarter 2 bits, 1 tier.
 pub const LOTUS_J2D1: (usize, usize) = (2, 1);
 /// Preset configuration: Jumpstarter 1 bit, 2 tiers.
@@ -573,5 +693,79 @@ mod tests {
             lotus_better > samples / 2,
             "Lotus should beat LEB128 more often than not"
         );
+    }
+
+    #[test]
+    fn bit_len_matches_framed() {
+        for (j, d) in [LOTUS_J3D1, LOTUS_J2D1, LOTUS_J1D2, (3, 2)] {
+            for v in [0u64, 1, 5, 42, 255, 65535, 1_000_000] {
+                let framed = lotus_encode_u64_framed(v, j, d).unwrap();
+                let bit_len = lotus_encoded_bit_len(v, j, d).unwrap();
+                assert_eq!(bit_len, framed.bit_len, "value={v} j={j} d={d}");
+            }
+        }
+    }
+
+    #[test]
+    fn streaming_writer_concatenates() {
+        let (j, d) = (3, 2);
+        let mut writer = BitWriter::new();
+        let bits_a = lotus_encode_into_writer(42, j, d, &mut writer).unwrap();
+        let bits_b = lotus_encode_into_writer(7, j, d, &mut writer).unwrap();
+        let bytes = writer.into_bytes();
+
+        let mut reader = BitReader::new(&bytes);
+        let (a, used_a) = lotus_decode_from_reader(&mut reader, j, d).unwrap();
+        let (b, used_b) = lotus_decode_from_reader(&mut reader, j, d).unwrap();
+        assert_eq!(a, 42);
+        assert_eq!(b, 7);
+        assert_eq!(used_a, bits_a);
+        assert_eq!(used_b, bits_b);
+    }
+
+    #[test]
+    fn streaming_writer_matches_standalone() {
+        let (j, d) = (3, 2);
+        let value = 12345u64;
+
+        let standalone = lotus_encode_u64(value, j, d).unwrap();
+        let standalone_bit_len = lotus_encode_u64_framed(value, j, d).unwrap().bit_len;
+
+        let mut writer = BitWriter::new();
+        lotus_encode_into_writer(value, j, d, &mut writer).unwrap();
+        let streamed = writer.into_bytes();
+
+        // Bytes should match exactly (both pad zeros at end of last byte).
+        assert_eq!(standalone, streamed);
+
+        // Decoding both via standalone API yields same result.
+        let (v1, _) = lotus_decode_u64(&standalone, j, d).unwrap();
+        let (v2, _) = lotus_decode_u64(&streamed, j, d).unwrap();
+        assert_eq!(v1, v2);
+        assert_eq!(v1, value);
+        let _ = standalone_bit_len;
+    }
+
+    #[test]
+    fn streaming_reader_alignment() {
+        // Encode three values back-to-back, decode them back, verify reader advances correctly.
+        let (j, d) = (3, 2);
+        let values = [0u64, 100, 65535];
+
+        let mut writer = BitWriter::new();
+        let mut expected_bits = 0usize;
+        for &v in &values {
+            let b = lotus_encode_into_writer(v, j, d, &mut writer).unwrap();
+            expected_bits += b;
+        }
+        let total_bits = writer.bits_written();
+        assert_eq!(total_bits, expected_bits);
+        let bytes = writer.into_bytes();
+
+        let mut reader = BitReader::new(&bytes);
+        for &expected in &values {
+            let (v, _) = lotus_decode_from_reader(&mut reader, j, d).unwrap();
+            assert_eq!(v, expected);
+        }
     }
 }
