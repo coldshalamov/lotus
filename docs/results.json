@@ -1,23 +1,101 @@
 [
   {
     "workload": "small",
-    "lotus_j2d1_bits_per_value": 10.85546875,
-    "lotus_j3d1_bits_per_value": 11.85546875,
+    "lotus": [
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "bits": 11.8515625
+      },
+      {
+        "label": "J2D1",
+        "j": 2,
+        "d": 1,
+        "bits": 10.85546875
+      },
+      {
+        "label": "J3D1",
+        "j": 3,
+        "d": 1,
+        "bits": 11.85546875
+      },
+      {
+        "label": "J3D2",
+        "j": 3,
+        "d": 2,
+        "bits": 13.8515625
+      }
+    ],
     "leb128_bits_per_value": 12.0,
+    "vlq_bits_per_value": 12.0,
+    "elias_gamma_bits_per_value": 13.078125,
     "elias_delta_bits_per_value": 11.984375
   },
   {
     "workload": "medium",
-    "lotus_j2d1_bits_per_value": 23.782178217821784,
-    "lotus_j3d1_bits_per_value": 24.782178217821784,
-    "leb128_bits_per_value": 23.762376237623762,
-    "elias_delta_bits_per_value": 26.673267326732674
+    "lotus": [
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "bits": 24.76
+      },
+      {
+        "label": "J2D1",
+        "j": 2,
+        "d": 1,
+        "bits": 23.77
+      },
+      {
+        "label": "J3D1",
+        "j": 3,
+        "d": 1,
+        "bits": 24.77
+      },
+      {
+        "label": "J3D2",
+        "j": 3,
+        "d": 2,
+        "bits": 26.76
+      }
+    ],
+    "leb128_bits_per_value": 23.76,
+    "vlq_bits_per_value": 23.76,
+    "elias_gamma_bits_per_value": 36.6,
+    "elias_delta_bits_per_value": 26.66
   },
   {
     "workload": "large32",
-    "lotus_j2d1_bits_per_value": null,
-    "lotus_j3d1_bits_per_value": 37.49689440993789,
-    "leb128_bits_per_value": 39.30434782608695,
-    "elias_delta_bits_per_value": 39.6583850931677
+    "lotus": [
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "bits": null
+      },
+      {
+        "label": "J2D1",
+        "j": 2,
+        "d": 1,
+        "bits": null
+      },
+      {
+        "label": "J3D1",
+        "j": 3,
+        "d": 1,
+        "bits": 37.4875
+      },
+      {
+        "label": "J3D2",
+        "j": 3,
+        "d": 2,
+        "bits": 39.48125
+      }
+    ],
+    "leb128_bits_per_value": 39.3,
+    "vlq_bits_per_value": 39.3,
+    "elias_gamma_bits_per_value": 60.5375,
+    "elias_delta_bits_per_value": 39.64375
   }
 ]

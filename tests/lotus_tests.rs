@@ -1,27 +1,16 @@
 #[cfg(feature = "bigint")]
 use lotus::lotus_encode_biguint;
+use lotus::metrics::{
+    elias_delta_decode, elias_delta_encode, elias_delta_len, elias_gamma_bits, elias_gamma_decode,
+    elias_gamma_encode, leb128_bits, leb128_decode, leb128_encode, vlq_bits, vlq_decode,
+    vlq_encode,
+};
 use lotus::{
     LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, LotusError, lotus_decode_u64, lotus_encode_u64,
     lotus_encode_u64_framed,
 };
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-
-fn leb128_encode(mut value: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-            out.push(byte);
-        } else {
-            out.push(byte);
-            break;
-        }
-    }
-    out
-}
 
 fn max_width_for_config(j_bits: usize, tiers: usize) -> u128 {
     let mut max_width = 1u128 << j_bits;
@@ -159,6 +148,121 @@ fn u64_max_with_deeper_tiers() {
 fn value_too_large_for_small_config() {
     let err = lotus_encode_u64(60, 1, 1).unwrap_err();
     assert_eq!(err, LotusError::ValueTooLarge);
+}
+
+// ---------------------------------------------------------------------------
+// Comparator codec correctness (LEB128, VLQ, Elias gamma, Elias delta)
+// ---------------------------------------------------------------------------
+
+/// Boundary + magnitude samples that exercise every transition a varint or
+/// universal code makes: byte/7-bit boundaries for the byte varints, and
+/// power-of-two + power-of-two-minus-one boundaries for the Elias codes.
+///
+/// `u64::MAX` is intentionally excluded: Elias γ/δ code the positive integer
+/// `x = value + 1`, which does not fit u64 for `value = u64::MAX`. The byte
+/// varints handle it, but the shared sample set keeps the codecs comparable.
+fn codec_samples() -> Vec<u64> {
+    vec![
+        0,
+        1,
+        2,
+        3,
+        126,
+        127,
+        128,
+        129,
+        255,
+        256,
+        16383,
+        16384,
+        16385,
+        65535,
+        65536,
+        2_097_151,
+        2_097_152,
+        1_000_000,
+        4_294_967_295, // u32::MAX
+        (1u64 << 40) - 1,
+        u64::MAX - 2,
+        u64::MAX - 1,
+    ]
+}
+
+#[test]
+fn leb128_round_trip_and_bits() {
+    for v in codec_samples() {
+        let enc = leb128_encode(v);
+        let (dec, used) = leb128_decode(&enc).expect("decode");
+        assert_eq!(dec, v, "leb128 value {v}");
+        assert_eq!(used, enc.len(), "leb128 consumed {v}");
+        assert_eq!(enc.len() * 8, leb128_bits(v), "leb128_bits {v}");
+    }
+}
+
+#[test]
+fn vlq_round_trip_and_bits() {
+    for v in codec_samples() {
+        let enc = vlq_encode(v);
+        let (dec, used) = vlq_decode(&enc).expect("decode");
+        assert_eq!(dec, v, "vlq value {v}");
+        assert_eq!(used, enc.len(), "vlq consumed {v}");
+        assert_eq!(enc.len() * 8, vlq_bits(v), "vlq_bits {v}");
+    }
+}
+
+#[test]
+fn elias_gamma_round_trip_and_bits() {
+    for v in codec_samples() {
+        let enc = elias_gamma_encode(v);
+        let (dec, used) = elias_gamma_decode(&enc).expect("decode");
+        assert_eq!(dec, v, "elias gamma value {v}");
+        assert_eq!(
+            used,
+            elias_gamma_bits(v),
+            "elias gamma consumed == bits fn {v}"
+        );
+    }
+}
+
+#[test]
+fn elias_delta_round_trip_and_bits() {
+    for v in codec_samples() {
+        let enc = elias_delta_encode(v);
+        let (dec, used) = elias_delta_decode(&enc).expect("decode");
+        assert_eq!(dec, v, "elias delta value {v}");
+        assert_eq!(
+            used,
+            elias_delta_len(v),
+            "elias delta consumed == bits fn {v}"
+        );
+    }
+}
+
+#[test]
+fn byte_varints_reject_truncated_input() {
+    // A stream with only continuation bytes is incomplete.
+    let incomplete = [0x80u8, 0x80, 0x80];
+    assert_eq!(
+        leb128_decode(&incomplete).unwrap_err(),
+        LotusError::UnexpectedEof
+    );
+    assert_eq!(
+        vlq_decode(&incomplete).unwrap_err(),
+        LotusError::UnexpectedEof
+    );
+}
+
+#[test]
+fn elias_codes_round_trip_random() {
+    let mut rng = StdRng::seed_from_u64(0xc0de_c0de);
+    // Elias γ/δ code x = value + 1, so the max representable value is u64::MAX - 1.
+    for _ in 0..2000 {
+        let v = rng.r#gen::<u64>() % u64::MAX;
+        let g_enc = elias_gamma_encode(v);
+        assert_eq!(elias_gamma_decode(&g_enc).unwrap().0, v);
+        let d_enc = elias_delta_encode(v);
+        assert_eq!(elias_delta_decode(&d_enc).unwrap().0, v);
+    }
 }
 
 #[cfg(feature = "bigint")]

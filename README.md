@@ -7,6 +7,8 @@
 
 Lotus is a parametric bit-level integer codec for Rust. It reclaims representational density by mapping every fixed-width bitstring into contiguous integer ranges, then restores self-delimiting behavior using a bounded tier chain and jumpstarter.
 
+> **Try it live:** the [interactive demo](docs/index.html) (open in a browser) lets you tune `(J, d)`, run a value counter, and watch Lotus's size-efficiency shift against LEB128, VLQ, and the Elias codes as values climb. Every number it shows is self-verified against a Rust-generated reference fixture.
+
 ## Project status
 
 This crate is **experimental** and actively hardened for reproducibility and correctness. Public APIs are small and documented, and benchmark claims are generated from code in this repository.

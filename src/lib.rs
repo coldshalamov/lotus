@@ -153,23 +153,23 @@ fn lotus_encode_value_biguint(value: &BigUint) -> Result<(BigUint, usize), Lotus
     }
 }
 
+/// Width `w` such that `2^w − 2 <= value <= 2^(w+1) − 3`, i.e. `w = floor(log2(value + 2))`.
+///
+/// This is the closed-form equivalent of the original linear search. It is
+/// bit-identical in output to the loop for every `value` the loop accepted:
+/// the loop could not materialize the end-bound for `w = 127` (it requires
+/// `1u128 << 128`), so it returned `ValueTooLarge` for `value >= 2^127 − 2`.
+/// We preserve that exact contract.
 fn lotus_width_for_value(value: u128) -> Result<usize, LotusError> {
-    let mut width = 1usize;
-    loop {
-        let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
-        let start = 1u128
-            .checked_shl(width_u32)
-            .ok_or(LotusError::ValueTooLarge)?
-            .saturating_sub(2);
-        let end = 1u128
-            .checked_shl(width_u32.saturating_add(1))
-            .ok_or(LotusError::ValueTooLarge)?
-            .saturating_sub(3);
-        if value >= start && value <= end {
-            return Ok(width);
-        }
-        width = width.checked_add(1).ok_or(LotusError::ValueTooLarge)?;
+    const WIDTH_FLOOR: u128 = (1u128 << 127) - 2; // start of the (unrepresentable) w = 127 band
+    if value >= WIDTH_FLOOR {
+        return Err(LotusError::ValueTooLarge);
     }
+    // `value + 2` lies in `[2, 2^127)`, so the addition cannot overflow and the
+    // value always has at least one set bit, making `leading_zeros` well-defined.
+    let shifted = value + 2;
+    let bit_len = 128 - shifted.leading_zeros();
+    Ok((bit_len - 1) as usize)
 }
 
 fn lotus_encode_fixed(value: u128, width: usize) -> Result<u64, LotusError> {
@@ -216,6 +216,25 @@ fn lotus_decode_fixed(payload: u64, width: usize) -> Result<u128, LotusError> {
     let start = base.saturating_sub(2);
     let decoded = start.saturating_add(payload_u128);
     Ok(decoded)
+}
+
+/// u64-specialized fixed-width decode returning `m = (2^width − 2) + payload`.
+///
+/// This is the exact u64 analogue of `lotus_decode_fixed` for `width <= 63`,
+/// which covers every tier-chain decode (widths there describe widths and are
+/// small) and the vast majority of final payloads. Staying in u64 avoids the
+/// u128 widening the original did on every fixed decode.
+#[inline]
+fn lotus_decode_fixed_u64(payload: u64, width: usize) -> Result<u64, LotusError> {
+    if width == 0 || width > 63 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    if payload >> width != 0 {
+        return Err(LotusError::InvalidEncoding);
+    }
+    // 2^width − 2 is non-negative for width >= 1, and the sum stays in u64
+    // because both operands are < 2^63 here.
+    Ok(((1u64 << width) - 2) + payload)
 }
 
 #[cfg(feature = "bigint")]
@@ -398,7 +417,13 @@ pub fn lotus_decode_u64(
 
     for _ in 0..tiers {
         let tier_payload = reader.read_bits(next_width)?;
-        let width_value = lotus_decode_fixed(tier_payload, next_width)?;
+        // Tier values are themselves widths: small and always u64-representable,
+        // so the u64 fast path covers them.
+        let width_value = if next_width <= 63 {
+            u128::from(lotus_decode_fixed_u64(tier_payload, next_width)?)
+        } else {
+            lotus_decode_fixed(tier_payload, next_width)?
+        };
         if width_value == 0 || width_value > max_width {
             return Err(LotusError::ValueTooLarge);
         }
@@ -406,16 +431,27 @@ pub fn lotus_decode_u64(
     }
 
     let payload = reader.read_bits(next_width)?;
-    let m = lotus_decode_fixed(payload, next_width)?;
-    if m == 0 {
-        return Err(LotusError::InvalidEncoding);
-    }
-    let value = m - 1;
-    if value > u64::MAX as u128 {
-        return Err(LotusError::ValueTooLarge);
-    }
+    let value = if next_width <= 63 {
+        // m fits u64; m == 0 is the only invalid payload here.
+        let m = lotus_decode_fixed_u64(payload, next_width)?;
+        if m == 0 {
+            return Err(LotusError::InvalidEncoding);
+        }
+        m - 1
+    } else {
+        // width == 64: m can be 2^64 (value = u64::MAX), which needs u128.
+        let m = lotus_decode_fixed(payload, next_width)?;
+        if m == 0 {
+            return Err(LotusError::InvalidEncoding);
+        }
+        let value = m - 1;
+        if value > u64::MAX as u128 {
+            return Err(LotusError::ValueTooLarge);
+        }
+        value as u64
+    };
     let total_bits = reader.bits_consumed().saturating_sub(start_bits);
-    Ok((value as u64, total_bits))
+    Ok((value, total_bits))
 }
 
 /// Compute the exact bit length of `lotus_encode_u64(value, j_bits, tiers)`
@@ -518,7 +554,11 @@ pub fn lotus_decode_from_reader(
 
     for _ in 0..tiers {
         let tier_payload = reader.read_bits(next_width)?;
-        let width_value = lotus_decode_fixed(tier_payload, next_width)?;
+        let width_value = if next_width <= 63 {
+            u128::from(lotus_decode_fixed_u64(tier_payload, next_width)?)
+        } else {
+            lotus_decode_fixed(tier_payload, next_width)?
+        };
         if width_value == 0 || width_value > max_width {
             return Err(LotusError::ValueTooLarge);
         }
@@ -526,16 +566,25 @@ pub fn lotus_decode_from_reader(
     }
 
     let payload = reader.read_bits(next_width)?;
-    let m = lotus_decode_fixed(payload, next_width)?;
-    if m == 0 {
-        return Err(LotusError::InvalidEncoding);
-    }
-    let value = m - 1;
-    if value > u64::MAX as u128 {
-        return Err(LotusError::ValueTooLarge);
-    }
+    let value = if next_width <= 63 {
+        let m = lotus_decode_fixed_u64(payload, next_width)?;
+        if m == 0 {
+            return Err(LotusError::InvalidEncoding);
+        }
+        m - 1
+    } else {
+        let m = lotus_decode_fixed(payload, next_width)?;
+        if m == 0 {
+            return Err(LotusError::InvalidEncoding);
+        }
+        let value = m - 1;
+        if value > u64::MAX as u128 {
+            return Err(LotusError::ValueTooLarge);
+        }
+        value as u64
+    };
     let total_bits = reader.bits_consumed().saturating_sub(start_bits);
-    Ok((value as u64, total_bits))
+    Ok((value, total_bits))
 }
 
 /// Preset configuration: Jumpstarter 2 bits, 1 tier.
@@ -775,6 +824,144 @@ mod tests {
         for &expected in &values {
             let (v, _) = lotus_decode_from_reader(&mut reader, j, d).unwrap();
             assert_eq!(v, expected);
+        }
+    }
+
+    /// Reference implementation of the original linear width search, kept here to
+    /// prove the O(1) `lotus_width_for_value` is bit-identical over the full
+    /// domain the loop accepted.
+    fn width_reference(value: u128) -> Result<usize, LotusError> {
+        let mut width = 1usize;
+        loop {
+            let width_u32 = u32::try_from(width).map_err(|_| LotusError::ValueTooLarge)?;
+            let start = 1u128
+                .checked_shl(width_u32)
+                .ok_or(LotusError::ValueTooLarge)?
+                .saturating_sub(2);
+            let end = 1u128
+                .checked_shl(width_u32.saturating_add(1))
+                .ok_or(LotusError::ValueTooLarge)?
+                .saturating_sub(3);
+            if value >= start && value <= end {
+                return Ok(width);
+            }
+            width = width.checked_add(1).ok_or(LotusError::ValueTooLarge)?;
+        }
+    }
+
+    #[test]
+    fn o1_width_matches_reference_exhaustive_small() {
+        // Exhaustive over [0, 2^24): every value the loop accepts, plus the
+        // boundary values just below WIDTH_FLOOR.
+        for value in 0u128..(1 << 24) {
+            assert_eq!(
+                lotus_width_for_value(value).unwrap(),
+                width_reference(value).unwrap(),
+                "value={value}"
+            );
+        }
+    }
+
+    #[test]
+    fn o1_width_matches_reference_random_large() {
+        // Deterministic LCG over the upper domain, including near WIDTH_FLOOR.
+        let floor = (1u128 << 127) - 2;
+        let mut seed: u128 = 0x9e37_79b9_7f4a_7c15_1234_5678_9abc_def0;
+        for _ in 0..100_000 {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let value = seed % floor;
+            assert_eq!(
+                lotus_width_for_value(value).unwrap(),
+                width_reference(value).unwrap(),
+                "value={value}"
+            );
+        }
+    }
+
+    #[test]
+    fn o1_width_rejects_unrepresentable_band() {
+        // The original loop could not form the w=127 end bound (needs 1<<128),
+        // so it returned ValueTooLarge for value >= 2^127 - 2. Preserve that.
+        let floor = (1u128 << 127) - 2;
+        assert_eq!(lotus_width_for_value(floor), Err(LotusError::ValueTooLarge));
+        assert_eq!(
+            lotus_width_for_value(u128::MAX),
+            Err(LotusError::ValueTooLarge)
+        );
+    }
+
+    #[test]
+    fn u64_fixed_decode_matches_u128_reference() {
+        // For every width up to 16 (exhaustive over its payload space) plus a
+        // sparse sample of larger widths, the u64 fast path must return the
+        // same `m` as the u128 reference.
+        for width in 1..=16usize {
+            let start = (1u128 << width) - 2;
+            for payload in 0..(1u64 << width) {
+                let expected = start + payload as u128;
+                let got = u128::from(lotus_decode_fixed_u64(payload, width).unwrap());
+                assert_eq!(got, expected, "width={width} payload={payload}");
+            }
+        }
+        // Sparse checks for larger widths (boundaries + width-bounded samples).
+        for width in [17usize, 24, 32, 48, 63] {
+            let start = (1u128 << width) - 2;
+            let max_payload = (1u64 << width) - 1;
+            for payload in [0u64, 1, max_payload, max_payload / 2] {
+                let expected = start + payload as u128;
+                let got = u128::from(lotus_decode_fixed_u64(payload, width).unwrap());
+                assert_eq!(got, expected, "width={width} payload={payload}");
+            }
+        }
+    }
+
+    #[test]
+    fn u64_fixed_decode_rejects_out_of_range_payload() {
+        for width in 1..=63usize {
+            let over = 1u64 << width; // payload >= 2^width is invalid
+            assert_eq!(
+                lotus_decode_fixed_u64(over, width),
+                Err(LotusError::InvalidEncoding),
+                "width={width}"
+            );
+        }
+        // width == 0 and width == 64 are out of the fast path's domain.
+        assert_eq!(lotus_decode_fixed_u64(0, 0), Err(LotusError::ValueTooLarge));
+        assert_eq!(
+            lotus_decode_fixed_u64(0, 64),
+            Err(LotusError::ValueTooLarge)
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2048))]
+        #[test]
+        fn round_trip_all_configs(u in 0u64..u64::MAX) {
+            for (j, d) in [(1usize, 2usize), (2, 1), (3, 1), (3, 2)] {
+                // Some configs cannot represent large values; only assert when
+                // encoding succeeds.
+                let Ok(encoded) = lotus_encode_u64(u, j, d) else {
+                    continue;
+                };
+                let (decoded, _) = lotus_decode_u64(&encoded, j, d)?;
+                prop_assert_eq!(decoded, u);
+            }
+        }
+
+        #[test]
+        fn streaming_round_trip_all_configs(u in 0u64..u64::MAX) {
+            for (j, d) in [(1usize, 2usize), (2, 1), (3, 1), (3, 2)] {
+                let mut writer = BitWriter::new();
+                if lotus_encode_into_writer(u, j, d, &mut writer).is_err() {
+                    continue;
+                }
+                let bytes = writer.into_bytes();
+                let mut reader = BitReader::new(&bytes);
+                let (decoded, _) = lotus_decode_from_reader(&mut reader, j, d)?;
+                prop_assert_eq!(decoded, u);
+            }
         }
     }
 }
