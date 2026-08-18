@@ -1,15 +1,10 @@
 # Benchmark methodology and reproducibility
 
-Lotus separates benchmark evidence into two categories:
+Lotus keeps deterministic size evidence separate from runtime throughput.
 
-1. **Deterministic size statistics** (used for docs claims)
-2. **Runtime throughput measurements** (Criterion reports)
+## Exact size evidence
 
-## 1) Deterministic size statistics
-
-Deterministic benchmark-size outputs are generated from `src/metrics.rs` workloads and codecs.
-
-Generate artifacts:
+Run:
 
 ```bash
 scripts/reproduce_paper.sh
@@ -17,80 +12,43 @@ scripts/reproduce_paper.sh
 
 This regenerates:
 
-- `docs/RESULTS.md` (human-readable table)
-- `docs/results.json` (machine-readable data)
+- `docs/RESULTS.md`
+- `docs/results.json`
+- `docs/demo-fixture.js`
 
-CI checks these files for drift with `scripts/check_generated.sh`.
+The size report is computed analytically by partitioning each inclusive integer domain at every point where Lotus, LEB128/VLQ, Elias gamma, or Elias delta can change length. Each interval is aggregated in constant time.
 
-### Workloads
+The complete `u32` and `u64` rows therefore cover every value exactly. They are not sparse grids and not Monte Carlo estimates.
 
-- `small`: `0..=255`
-- `medium`: `0..1_000_000` sampled every `10_000`
-- `large32`: `0..4_000_000_000` sampled every `25_000_000`
+Only the recommended profile frontier is reported:
 
-### Codecs compared
+- J1D1: tiny-range minimum overhead.
+- J2D1: one-tier density through `2^31 - 3`.
+- J1D2: minimum-bit full-`u64` profile.
+- J3D1: one-tier full-`u64` profile.
 
-- **Lotus** in four `(J, d)` configurations: J1D2, J2D1, J3D1, J3D2.
-- **LEB128** — little-endian base-128 varint (protobuf / DWARF / WebAssembly).
-- **VLQ** — big-endian base-128 varint (MIDI / Bitcoin).
-- **Elias γ** — bit-oriented universal code.
-- **Elias δ** — bit-oriented universal code.
+## Meaningful bits versus backing bytes
 
-All comparators are real round-trip codecs implemented in `src/metrics.rs` (encode + decode + exact bit-length helpers), covered by round-trip and exact-bit-length tests in `tests/lotus_tests.rs`.
+Lotus is bit-oriented. Generated size tables count exact meaningful bits.
 
-### Reading the size table
+A standalone encode returns a byte vector whose final byte may contain zero padding. Comparing `bytes.len() * 8` per value measures a byte-framed protocol, not a packed Lotus stream. Use `EncodedLotus.bit_len`, `lotus_encoded_bit_len`, or the streaming writer.
 
-Lotus and the Elias codes are **bit-oriented**: their length grows smoothly with the
-magnitude of the value. LEB128 and VLQ are **byte-oriented**: their length jumps in
-8-bit steps at every `×128` boundary. So:
+## Runtime throughput
 
-- For small values, Lotus's per-value header overhead is amortized and it wins on density.
-- At medium magnitudes, Lotus and the byte varints are roughly even.
-- For large values, Lotus (with enough tiers) pulls ahead again because it never rounds
-  up to a whole byte.
-
-## 2) Runtime throughput measurements
-
-Throughput is measured via Criterion:
+Run:
 
 ```bash
 cargo bench --bench comparison
 ```
 
-Criterion output is written under `target/criterion/` and is intentionally not committed.
+Criterion uses finite deterministic workloads and measures:
 
-### Decode and encode benchmarks
+- packed Lotus stream encoding and decoding,
+- LEB128 and VLQ,
+- Elias gamma and delta.
 
-`benches/comparison.rs` measures both directions:
+Runtime numbers remain under `target/criterion/` and are not committed as portable facts.
 
-- `decode_{workload}` — pre-encode a batch, then bench the decode loop.
-- `encode_{workload}` — bench the encode loop.
+## Drift prevention
 
-Each group covers all four Lotus configs plus LEB128, VLQ, Elias γ, and Elias δ.
-
-### Honest comparison caveats
-
-- **Lotus is bit-oriented; LEB128/VLQ are byte-oriented.** Byte varints read whole bytes
-  with shift/mask and no cross-byte bit packing, so they are inherently cheaper per value
-  on raw `ns/value`. Lotus and the Elias codes share the bit-packing cost.
-- Throughput depends on CPU/toolchain/runtime settings and must be reproduced locally.
-- Claims should cite generated artifacts or Criterion outputs, not hand-edited numbers.
-
-## Interactive demo
-
-`docs/index.html` is a self-contained, offline interactive page that recomputes Lotus
-bit lengths in JavaScript (a faithful port of `src/lib.rs`) and self-verifies against a
-Rust-generated reference fixture on every page load. The fixture is produced by:
-
-```bash
-cargo run --example generate_demo_fixture
-```
-
-The demo shows **size** only (deterministic). It deliberately does **not** display runtime
-throughput, which is not reproducible from a static page.
-
-## Important caveats
-
-- Deterministic docs tables represent **size** only, not speed.
-- Throughput depends on CPU/toolchain/runtime settings and must be reproduced locally.
-- Claims should cite generated artifacts or Criterion outputs, not hand-edited markdown numbers.
+`scripts/check_generated.sh` regenerates every artifact and fails if any committed output changes. The HTML demo also verifies its JavaScript math against the Rust-generated boundary fixture on page load.
