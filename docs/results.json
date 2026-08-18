@@ -1,101 +1,340 @@
 [
   {
-    "workload": "small",
+    "workload": "tiny",
+    "start": "0",
+    "end": "125",
+    "values": "126",
     "lotus": [
       {
-        "label": "J1D2",
+        "label": "J1D1",
         "j": 1,
-        "d": 2,
-        "bits": 11.8515625
+        "d": 1,
+        "total_bits": "1014",
+        "bits_per_value": "8.047619",
+        "versus_leb128": {
+          "wins": "30",
+          "ties": "32",
+          "losses": "64",
+          "win_percent": "23.809524",
+          "tie_percent": "25.396825",
+          "loss_percent": "50.793651"
+        }
       },
       {
         "label": "J2D1",
         "j": 2,
         "d": 1,
-        "bits": 10.85546875
+        "total_bits": "1140",
+        "bits_per_value": "9.047619",
+        "versus_leb128": {
+          "wins": "14",
+          "ties": "16",
+          "losses": "96",
+          "win_percent": "11.111111",
+          "tie_percent": "12.698413",
+          "loss_percent": "76.190476"
+        }
+      },
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "total_bits": "1140",
+        "bits_per_value": "9.047619",
+        "versus_leb128": {
+          "wins": "14",
+          "ties": "16",
+          "losses": "96",
+          "win_percent": "11.111111",
+          "tie_percent": "12.698413",
+          "loss_percent": "76.190476"
+        }
       },
       {
         "label": "J3D1",
         "j": 3,
         "d": 1,
-        "bits": 11.85546875
-      },
-      {
-        "label": "J3D2",
-        "j": 3,
-        "d": 2,
-        "bits": 13.8515625
+        "total_bits": "1266",
+        "bits_per_value": "10.047619",
+        "versus_leb128": {
+          "wins": "6",
+          "ties": "8",
+          "losses": "112",
+          "win_percent": "4.761905",
+          "tie_percent": "6.349206",
+          "loss_percent": "88.888889"
+        }
       }
     ],
-    "leb128_bits_per_value": 12.0,
-    "vlq_bits_per_value": 12.0,
-    "elias_gamma_bits_per_value": 13.078125,
-    "elias_delta_bits_per_value": 11.984375
+    "leb128_total_bits": "1008",
+    "leb128_bits_per_value": "8.000000",
+    "vlq_total_bits": "1008",
+    "vlq_bits_per_value": "8.000000",
+    "elias_gamma_total_bits": "1398",
+    "elias_gamma_bits_per_value": "11.095238",
+    "elias_delta_total_bits": "1250",
+    "elias_delta_bits_per_value": "9.920635"
   },
   {
-    "workload": "medium",
+    "workload": "small_u8",
+    "start": "0",
+    "end": "255",
+    "values": "256",
     "lotus": [
       {
-        "label": "J1D2",
+        "label": "J1D1",
         "j": 1,
-        "d": 2,
-        "bits": 24.76
+        "d": 1,
+        "total_bits": null,
+        "bits_per_value": null,
+        "versus_leb128": null
       },
       {
         "label": "J2D1",
         "j": 2,
         "d": 1,
-        "bits": 23.77
+        "total_bits": "2702",
+        "bits_per_value": "10.554688",
+        "versus_leb128": {
+          "wins": "142",
+          "ties": "16",
+          "losses": "98",
+          "win_percent": "55.468750",
+          "tie_percent": "6.250000",
+          "loss_percent": "38.281250"
+        }
+      },
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "total_bits": "2832",
+        "bits_per_value": "11.062500",
+        "versus_leb128": {
+          "wins": "142",
+          "ties": "16",
+          "losses": "98",
+          "win_percent": "55.468750",
+          "tie_percent": "6.250000",
+          "loss_percent": "38.281250"
+        }
       },
       {
         "label": "J3D1",
         "j": 3,
         "d": 1,
-        "bits": 24.77
-      },
-      {
-        "label": "J3D2",
-        "j": 3,
-        "d": 2,
-        "bits": 26.76
+        "total_bits": "2958",
+        "bits_per_value": "11.554688",
+        "versus_leb128": {
+          "wins": "134",
+          "ties": "8",
+          "losses": "114",
+          "win_percent": "52.343750",
+          "tie_percent": "3.125000",
+          "loss_percent": "44.531250"
+        }
       }
     ],
-    "leb128_bits_per_value": 23.76,
-    "vlq_bits_per_value": 23.76,
-    "elias_gamma_bits_per_value": 36.6,
-    "elias_delta_bits_per_value": 26.66
+    "leb128_total_bits": "3072",
+    "leb128_bits_per_value": "12.000000",
+    "vlq_total_bits": "3072",
+    "vlq_bits_per_value": "12.000000",
+    "elias_gamma_total_bits": "3348",
+    "elias_gamma_bits_per_value": "13.078125",
+    "elias_delta_total_bits": "3068",
+    "elias_delta_bits_per_value": "11.984375"
   },
   {
-    "workload": "large32",
+    "workload": "medium_1m",
+    "start": "0",
+    "end": "1000000",
+    "values": "1000001",
     "lotus": [
       {
-        "label": "J1D2",
+        "label": "J1D1",
         "j": 1,
-        "d": 2,
-        "bits": null
+        "d": 1,
+        "total_bits": null,
+        "bits_per_value": null,
+        "versus_leb128": null
       },
       {
         "label": "J2D1",
         "j": 2,
         "d": 1,
-        "bits": null
+        "total_bits": "23918591",
+        "bits_per_value": "23.918567",
+        "versus_leb128": {
+          "wins": "247690",
+          "ties": "264208",
+          "losses": "488103",
+          "win_percent": "24.768975",
+          "tie_percent": "26.420774",
+          "loss_percent": "48.810251"
+        }
+      },
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "total_bits": "24918466",
+        "bits_per_value": "24.918441",
+        "versus_leb128": {
+          "wins": "115594",
+          "ties": "132112",
+          "losses": "752295",
+          "win_percent": "11.559388",
+          "tie_percent": "13.211187",
+          "loss_percent": "75.229425"
+        }
       },
       {
         "label": "J3D1",
         "j": 3,
         "d": 1,
-        "bits": 37.4875
-      },
-      {
-        "label": "J3D2",
-        "j": 3,
-        "d": 2,
-        "bits": 39.48125
+        "total_bits": "24918592",
+        "bits_per_value": "24.918567",
+        "versus_leb128": {
+          "wins": "115586",
+          "ties": "132104",
+          "losses": "752311",
+          "win_percent": "11.558588",
+          "tie_percent": "13.210387",
+          "loss_percent": "75.231025"
+        }
       }
     ],
-    "leb128_bits_per_value": 39.3,
-    "vlq_bits_per_value": 39.3,
-    "elias_gamma_bits_per_value": 60.5375,
-    "elias_delta_bits_per_value": 39.64375
+    "leb128_total_bits": "23867928",
+    "leb128_bits_per_value": "23.867904",
+    "vlq_total_bits": "23867928",
+    "vlq_bits_per_value": "23.867904",
+    "elias_gamma_total_bits": "36902929",
+    "elias_gamma_bits_per_value": "36.902892",
+    "elias_delta_total_bits": "26885669",
+    "elias_delta_bits_per_value": "26.885642"
+  },
+  {
+    "workload": "uniform_u32",
+    "start": "0",
+    "end": "4294967295",
+    "values": "4294967296",
+    "lotus": [
+      {
+        "label": "J1D1",
+        "j": 1,
+        "d": 1,
+        "total_bits": null,
+        "bits_per_value": null,
+        "versus_leb128": null
+      },
+      {
+        "label": "J2D1",
+        "j": 2,
+        "d": 1,
+        "total_bits": null,
+        "bits_per_value": null,
+        "versus_leb128": null
+      },
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "total_bits": "161061240644",
+        "bits_per_value": "37.499992",
+        "versus_leb128": {
+          "wins": "4058104710",
+          "ties": "33686546",
+          "losses": "203176040",
+          "win_percent": "94.485113",
+          "tie_percent": "0.784326",
+          "loss_percent": "4.730561"
+        }
+      },
+      {
+        "label": "J3D1",
+        "j": 3,
+        "d": 1,
+        "total_bits": "161061240770",
+        "bits_per_value": "37.499992",
+        "versus_leb128": {
+          "wins": "4058104702",
+          "ties": "33686538",
+          "losses": "203176056",
+          "win_percent": "94.485113",
+          "tie_percent": "0.784326",
+          "loss_percent": "4.730561"
+        }
+      }
+    ],
+    "leb128_total_bits": "169634298880",
+    "leb128_bits_per_value": "39.496063",
+    "vlq_total_bits": "169634298880",
+    "vlq_bits_per_value": "39.496063",
+    "elias_gamma_total_bits": "261993005124",
+    "elias_gamma_bits_per_value": "61.000000",
+    "elias_delta_total_bits": "171798626072",
+    "elias_delta_bits_per_value": "39.999985"
+  },
+  {
+    "workload": "uniform_u64",
+    "start": "0",
+    "end": "18446744073709551615",
+    "values": "18446744073709551616",
+    "lotus": [
+      {
+        "label": "J1D1",
+        "j": 1,
+        "d": 1,
+        "total_bits": null,
+        "bits_per_value": null,
+        "versus_leb128": null
+      },
+      {
+        "label": "J2D1",
+        "j": 2,
+        "d": 1,
+        "total_bits": null,
+        "bits_per_value": null,
+        "versus_leb128": null
+      },
+      {
+        "label": "J1D2",
+        "j": 1,
+        "d": 2,
+        "total_bits": "1300495457194375872390",
+        "bits_per_value": "70.500000",
+        "versus_leb128": {
+          "wins": "18446459269896323966",
+          "ties": "282578816992276",
+          "losses": "2224996235374",
+          "win_percent": "99.998456",
+          "tie_percent": "0.001532",
+          "loss_percent": "0.000012"
+        }
+      },
+      {
+        "label": "J3D1",
+        "j": 3,
+        "d": 1,
+        "total_bits": "1300495457194375872516",
+        "bits_per_value": "70.500000",
+        "versus_leb128": {
+          "wins": "18446459269896323958",
+          "ties": "282578816992268",
+          "losses": "2224996235390",
+          "win_percent": "99.998456",
+          "tie_percent": "0.001532",
+          "loss_percent": "0.000012"
+        }
+      }
+    ],
+    "leb128_total_bits": "1401371549788580740096",
+    "leb128_bits_per_value": "75.968504",
+    "vlq_total_bits": "1401371549788580740096",
+    "vlq_bits_per_value": "75.968504",
+    "elias_gamma_total_bits": "2305843009213693952132",
+    "elias_gamma_bits_per_value": "125.000000",
+    "elias_delta_total_bits": "1365059061450211786554",
+    "elias_delta_bits_per_value": "74.000000"
   }
 ]
