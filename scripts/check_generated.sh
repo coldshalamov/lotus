@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-before_results="$(sha256sum docs/RESULTS.md 2>/dev/null | awk '{print $1}')"
-before_json="$(sha256sum docs/results.json 2>/dev/null | awk '{print $1}')"
+files=(
+  docs/RESULTS.md
+  docs/results.json
+  docs/demo-fixture.js
+)
+
+declare -A before
+for file in "${files[@]}"; do
+  before["$file"]="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
+done
 
 scripts/reproduce_paper.sh
 
-after_results="$(sha256sum docs/RESULTS.md | awk '{print $1}')"
-after_json="$(sha256sum docs/results.json | awk '{print $1}')"
+changed=0
+for file in "${files[@]}"; do
+  after="$(sha256sum "$file" | awk '{print $1}')"
+  if [[ "${before[$file]}" != "$after" ]]; then
+    echo "Generated artifact changed after regeneration: $file" >&2
+    changed=1
+  fi
+done
 
-if [[ "$before_results" != "$after_results" || "$before_json" != "$after_json" ]]; then
-  echo "Generated benchmark artifacts changed after regeneration. Commit regenerated files." >&2
+if [[ "$changed" -ne 0 ]]; then
+  echo "Commit the regenerated artifacts." >&2
   exit 1
 fi
