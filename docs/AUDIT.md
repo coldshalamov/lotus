@@ -1,52 +1,33 @@
-# Maintainer Audit (trust and release readiness)
+# Maintainer audit: canonical-format convergence
 
-Date: 2026-03-15
+Date: 2026-08-18
 
-This audit ranks issues by **severity** and **user trust impact**.
+## Resolved critical issues
 
-## Critical
+1. **Multiple incompatible mapping semantics**
+   - The payload and width descriptors now use separate canonical nonnegative and positive mappings.
+   - Prototype shifted variants are removed rather than retained behind flags.
 
-1. **Benchmark evidence was hardcoded and non-reproducible**
-   - `scripts/reproduce_paper.sh` previously wrote fixed markdown numbers without deriving them from benchmark code.
-   - README and docs presented snapshot tables as measured evidence.
-   - Impact: direct credibility loss.
+2. **Stale range recurrence**
+   - Encoding validity is derived by constructing the actual width chain.
+   - Profile range reporting uses the same positive descriptor recurrence.
+   - Tests lock J1D1, J2D1, J1D2, and J3D1 boundaries.
 
-2. **Repository metadata used placeholder URLs**
-   - `Cargo.toml` contained `example/...` repository/homepage/docs links.
-   - Impact: crate presentation looked templated/fabricated.
+3. **Misleading uniform-domain evidence**
+   - Complete `u32` and `u64` claims now use exact interval aggregation.
+   - The 94.485113% J1D2 win rate against LEB128 is an exact regression.
 
-## High
+4. **Packed-bit versus padded-byte confusion**
+   - Examples and Criterion benchmarks use the streaming bit writer/reader.
+   - Documentation explicitly separates meaningful bits from backing bytes.
 
-3. **API ambiguity for bit-oriented framing**
-   - Core encoder returned `Vec<u8>` with no explicit bit length in type; this risks framing confusion when composing streams.
+5. **Demo and documentation drift**
+   - `docs/demo-fixture.js` is generated from Rust.
+   - The HTML JavaScript port verifies every fixture case at page load.
+   - Generated artifact freshness is enforced by CI.
 
-4. **CI over-claimed guarantees**
-   - Workflow posted benchmark comments and deployed pages directly from CI while benchmark artifacts were not generated truthfully.
+## Remaining research work
 
-5. **Docs drift and conflicting benchmark narratives**
-   - README/BENCHMARKS/RESULTS/WHITEPAPER contained inconsistent and partially unverifiable figures.
-
-## Medium
-
-6. **Dependency hygiene**
-   - CLI dependencies (`clap`, `hex`) were always included in main dependency graph.
-
-7. **Small-int fast path surfaced as public API but asymmetrically documented**
-   - Exposed optimization with no matching decode API created format/expectation ambiguity.
-
-8. **Malformed-input and adversarial test coverage gaps**
-   - Baseline tests existed, but lacked stronger truncation/trailing-bit/framing adversarial checks.
-
-## Implemented priorities in this pass
-
-1. Restore benchmark trust via generated artifacts + drift checks.
-2. Fix metadata professionalism and docs consistency.
-3. Clarify API framing with explicit encoded representation.
-4. Tighten CI to reflect verifiable guarantees.
-5. Add additional correctness/adversarial tests.
-
-## Remaining follow-up candidates
-
-- Add decode support for `BigUint` (currently encode-only API).
-- Add cargo-fuzz targets and seed corpus committed under `fuzz/`.
-- Add scheduled benchmark workflow for long-running throughput publication.
+- Add arbitrary-precision decoding to match the existing BigUint encoder.
+- Add fuzz targets for malformed packed streams.
+- Publish machine-specific Criterion baselines only with hardware/toolchain metadata.

@@ -1,22 +1,18 @@
 # Theory: where Lotus fits
 
-Lotus sits between dense fixed-width encodings and self-delimiting universal codes.
-By unfolding fixed-width bitstrings into consecutive integer ranges, it reclaims density while maintaining prefix-decodability through a bounded tier chain.
+Lotus is a bounded, self-describing integer code built from a dense fixed-width primitive.
 
-## Core properties
+The primitive reclaims leading-zero aliases by assigning every bitstring of width `L` to a distinct integer in one consecutive interval. A recursive chain of positive width descriptors restores prefix decoding. A fixed `J`-bit jumpstarter anchors that chain.
 
-- **Density reclaiming:** every distinct bitstring is assigned to a unique integer in contiguous ranges.
-- **Configurable envelope:** `(J, d)` determines representable range and overhead profile.
-- **Bit-level framing:** Lotus is naturally bit-oriented; exact bit length matters for stream composition.
+The key distinction is structural:
 
-## Trade-offs
+- payload integers are nonnegative and use `floor(log2(n + 2))`;
+- width descriptors are positive and use `floor(log2(v + 1))`.
 
-- Larger `J` increases fixed per-value header cost but expands immediate width state.
-- Larger `d` expands maximum range through recursive width descriptions, at added header complexity.
+That one-bit shift is the hinge of the format. Conflating the two mappings changes code lengths, range limits, and encoded bytes.
 
-## Evidence and claims
+Increasing `J` buys a wider outer state at fixed per-value cost. Increasing `d` buys range recursively at the cost of another descriptor. The useful `u64` profiles form a small Pareto frontier rather than an indiscriminate grid; see `docs/FORMAT.md`.
 
-For empirical size/speed claims, use reproducible artifacts and benchmark outputs documented in:
+Lotus's density advantage over LEB128 is a packed-bitstream advantage. LEB128 rounds each value to whole bytes. Lotus does not. If every Lotus value is independently padded to a byte, much of that advantage is intentionally discarded.
 
-- `docs/BENCHMARKS.md`
-- `docs/RESULTS.md`
+Exact empirical evidence is generated from interval aggregation in `src/metrics.rs`, not random samples or hand-written tables.
