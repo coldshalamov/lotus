@@ -64,29 +64,35 @@ fn main() {
         );
     }
 
-    print!("],\"cases\":[");
-    let mut first = true;
-    for value in fixture_values() {
-        for profile in RECOMMENDED_PROFILES {
-            if !first {
+    let values = fixture_values();
+    print!("],\"values\":[");
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            print!(",");
+        }
+        print!("\"{value}\"");
+    }
+
+    print!("],\"bits\":[");
+    for (value_index, &value) in values.iter().enumerate() {
+        if value_index != 0 {
+            print!(",");
+        }
+        print!("[");
+        for (profile_index, profile) in RECOMMENDED_PROFILES.iter().enumerate() {
+            if profile_index != 0 {
                 print!(",");
             }
-            first = false;
-            let bits = lotus_encoded_bit_len(
+            match lotus_encoded_bit_len(
                 value,
                 profile.config.jumpstarter_bits,
                 profile.config.tiers,
-            );
-            print!(
-                "{{\"value\":\"{}\",\"label\":\"{}\",\"bits\":",
-                value, profile.label
-            );
-            match bits {
+            ) {
                 Ok(bits) => print!("{bits}"),
                 Err(_) => print!("null"),
             }
-            print!("}}");
         }
+        print!("]");
     }
 
     let u32_summary = summarize_uniform_domain(UniformDomain {
