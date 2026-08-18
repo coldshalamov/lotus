@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use lotus::metrics::{SizeSummary, demo_lotus_configs, standard_workloads, summarize_sizes};
-use lotus::{LotusError, lotus_decode_u64, lotus_encode_u64_framed};
+use lotus::metrics::{ComparisonCounts, SizeSummary, summarize_standard_domains};
+use lotus::{LOTUS_DENSE_U64, LotusError, lotus_decode_u64, lotus_encode_u64_framed};
 use serde::Serialize;
 use std::fs;
 use std::io::{self, Read};
 
 #[derive(Parser)]
-#[command(author, version, about = "Lotus integer codec CLI")]
+#[command(author, version, about = "Canonical Lotus integer codec CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -21,34 +21,52 @@ enum OutputFormat {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Encode integers read from stdin (one decimal u64 per line)
+    /// Encode decimal u64 values read from stdin, one per line.
     Encode {
-        #[arg(short, long, default_value_t = 2)]
+        #[arg(
+            short,
+            long,
+            default_value_t = LOTUS_DENSE_U64.jumpstarter_bits
+        )]
         jumpstarter: usize,
-        #[arg(short, long, default_value_t = 1)]
+        #[arg(short, long, default_value_t = LOTUS_DENSE_U64.tiers)]
         tiers: usize,
-        /// Prefix each output line with consumed bit length
+        /// Prefix each output line with its exact meaningful bit length.
         #[arg(long)]
         with_bits: bool,
     },
-    /// Decode hex-encoded Lotus payloads from stdin (one payload per line)
+    /// Decode hex Lotus payloads read from stdin, one per line.
     Decode {
-        #[arg(short, long, default_value_t = 2)]
+        #[arg(
+            short,
+            long,
+            default_value_t = LOTUS_DENSE_U64.jumpstarter_bits
+        )]
         jumpstarter: usize,
-        #[arg(short, long, default_value_t = 1)]
+        #[arg(short, long, default_value_t = LOTUS_DENSE_U64.tiers)]
         tiers: usize,
-        /// Print consumed bit length after each value
+        /// Print the exact number of consumed bits after each value.
         #[arg(long)]
         with_bits: bool,
     },
-    /// Compute deterministic size summaries used in docs/RESULTS.md
+    /// Generate exact deterministic size evidence.
     Benchmark {
         #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
         format: OutputFormat,
-        /// Write output to a file (prints to stdout when omitted)
+        /// Write output to a file instead of stdout.
         #[arg(long)]
         output: Option<String>,
     },
+}
+
+#[derive(Debug, Serialize)]
+struct ComparisonJson {
+    wins: String,
+    ties: String,
+    losses: String,
+    win_percent: String,
+    tie_percent: String,
+    loss_percent: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,30 +74,26 @@ struct LotusConfigJson {
     label: &'static str,
     j: usize,
     d: usize,
-    bits: Option<f64>,
+    total_bits: Option<String>,
+    bits_per_value: Option<String>,
+    versus_leb128: Option<ComparisonJson>,
 }
 
 #[derive(Debug, Serialize)]
-struct SerializableSummary<'a> {
-    workload: &'a str,
+struct SerializableSummary {
+    workload: &'static str,
+    start: String,
+    end: String,
+    values: String,
     lotus: Vec<LotusConfigJson>,
-    leb128_bits_per_value: f64,
-    vlq_bits_per_value: f64,
-    elias_gamma_bits_per_value: f64,
-    elias_delta_bits_per_value: f64,
-}
-
-fn lotus_configs_json(summary: &SizeSummary) -> Vec<LotusConfigJson> {
-    summary
-        .lotus
-        .iter()
-        .map(|c| LotusConfigJson {
-            label: c.label,
-            j: c.j,
-            d: c.d,
-            bits: c.bits,
-        })
-        .collect()
+    leb128_total_bits: String,
+    leb128_bits_per_value: String,
+    vlq_total_bits: String,
+    vlq_bits_per_value: String,
+    elias_gamma_total_bits: String,
+    elias_gamma_bits_per_value: String,
+    elias_delta_total_bits: String,
+    elias_delta_bits_per_value: String,
 }
 
 fn read_stdin_to_string() -> io::Result<String> {
@@ -89,12 +103,14 @@ fn read_stdin_to_string() -> io::Result<String> {
 }
 
 fn parse_u64_line(line: &str) -> Result<u64, LotusError> {
-    line.trim().parse().map_err(|_| LotusError::InvalidEncoding)
+    line.trim()
+        .parse()
+        .map_err(|_| LotusError::InvalidEncoding)
 }
 
 fn encode_mode(j: usize, d: usize, with_bits: bool) -> Result<(), LotusError> {
     let input = read_stdin_to_string().map_err(|_| LotusError::UnexpectedEof)?;
-    for line in input.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
         let value = parse_u64_line(line)?;
         let encoded = lotus_encode_u64_framed(value, j, d)?;
         if with_bits {
@@ -108,92 +124,228 @@ fn encode_mode(j: usize, d: usize, with_bits: bool) -> Result<(), LotusError> {
 
 fn decode_mode(j: usize, d: usize, with_bits: bool) -> Result<(), LotusError> {
     let input = read_stdin_to_string().map_err(|_| LotusError::UnexpectedEof)?;
-    for line in input.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
         let bytes = hex::decode(line).map_err(|_| LotusError::InvalidEncoding)?;
         let (value, bits) = lotus_decode_u64(&bytes, j, d)?;
         if with_bits {
-            println!("{} {}", value, bits);
+            println!("{value} {bits}");
         } else {
-            println!("{}", value);
+            println!("{value}");
         }
     }
     Ok(())
 }
 
-fn as_json_rows(summaries: &[SizeSummary]) -> Vec<SerializableSummary<'_>> {
+fn format_ratio(numerator: u128, denominator: u128, decimals: u32) -> String {
+    debug_assert!(denominator != 0);
+    let scale = 10u128.pow(decimals);
+    let scaled = (numerator * scale + denominator / 2) / denominator;
+    let whole = scaled / scale;
+    let fraction = scaled % scale;
+    format!(
+        "{whole}.{fraction:0width$}",
+        width = usize::try_from(decimals).expect("decimal count fits usize")
+    )
+}
+
+fn format_percent(count: u128, total: u128) -> String {
+    format_ratio(count * 100, total, 6)
+}
+
+fn comparison_json(counts: ComparisonCounts, total: u128) -> ComparisonJson {
+    ComparisonJson {
+        wins: counts.wins.to_string(),
+        ties: counts.ties.to_string(),
+        losses: counts.losses.to_string(),
+        win_percent: format_percent(counts.wins, total),
+        tie_percent: format_percent(counts.ties, total),
+        loss_percent: format_percent(counts.losses, total),
+    }
+}
+
+fn as_json_rows(summaries: &[SizeSummary]) -> Vec<SerializableSummary> {
     summaries
         .iter()
-        .map(|s| SerializableSummary {
-            workload: s.workload,
-            lotus: lotus_configs_json(s),
-            leb128_bits_per_value: s.leb128_bits,
-            vlq_bits_per_value: s.vlq_bits,
-            elias_gamma_bits_per_value: s.elias_gamma_bits,
-            elias_delta_bits_per_value: s.elias_delta_bits,
+        .map(|summary| SerializableSummary {
+            workload: summary.workload,
+            start: summary.start.to_string(),
+            end: summary.end.to_string(),
+            values: summary.values.to_string(),
+            lotus: summary
+                .lotus
+                .iter()
+                .map(|config| LotusConfigJson {
+                    label: config.label,
+                    j: config.j,
+                    d: config.d,
+                    total_bits: config.total_bits.map(|value| value.to_string()),
+                    bits_per_value: config
+                        .total_bits
+                        .map(|value| format_ratio(value, summary.values, 6)),
+                    versus_leb128: config
+                        .versus_leb128
+                        .map(|counts| comparison_json(counts, summary.values)),
+                })
+                .collect(),
+            leb128_total_bits: summary.leb128_total_bits.to_string(),
+            leb128_bits_per_value: format_ratio(
+                summary.leb128_total_bits,
+                summary.values,
+                6,
+            ),
+            vlq_total_bits: summary.vlq_total_bits.to_string(),
+            vlq_bits_per_value: format_ratio(summary.vlq_total_bits, summary.values, 6),
+            elias_gamma_total_bits: summary.elias_gamma_total_bits.to_string(),
+            elias_gamma_bits_per_value: format_ratio(
+                summary.elias_gamma_total_bits,
+                summary.values,
+                6,
+            ),
+            elias_delta_total_bits: summary.elias_delta_total_bits.to_string(),
+            elias_delta_bits_per_value: format_ratio(
+                summary.elias_delta_total_bits,
+                summary.values,
+                6,
+            ),
         })
         .collect()
 }
 
 fn render_csv(summaries: &[SizeSummary]) -> String {
-    let mut header = String::from("workload");
-    for &(label, _j, _d) in demo_lotus_configs() {
-        header.push_str(&format!(",lotus_{label}_bits_per_value"));
-    }
-    header.push_str(",leb128_bits_per_value,vlq_bits_per_value,elias_gamma_bits_per_value,elias_delta_bits_per_value\n");
-
-    let mut out = header;
-    for s in summaries {
-        out.push_str(s.workload);
-        for c in &s.lotus {
-            out.push(',');
-            out.push_str(
-                &c.bits
-                    .map(|v| format!("{v:.4}"))
-                    .unwrap_or_else(|| "NA".to_string()),
-            );
+    let mut out = String::from(
+        "workload,start,end,values,profile,j,d,total_bits,bits_per_value,wins,ties,losses,win_percent,tie_percent,loss_percent,leb128_bits_per_value\n",
+    );
+    for summary in summaries {
+        for config in &summary.lotus {
+            let total_bits = config
+                .total_bits
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "NA".to_string());
+            let bits_per_value = config
+                .total_bits
+                .map(|value| format_ratio(value, summary.values, 6))
+                .unwrap_or_else(|| "NA".to_string());
+            let (wins, ties, losses, win_percent, tie_percent, loss_percent) =
+                if let Some(counts) = config.versus_leb128 {
+                    (
+                        counts.wins.to_string(),
+                        counts.ties.to_string(),
+                        counts.losses.to_string(),
+                        format_percent(counts.wins, summary.values),
+                        format_percent(counts.ties, summary.values),
+                        format_percent(counts.losses, summary.values),
+                    )
+                } else {
+                    (
+                        "NA".to_string(),
+                        "NA".to_string(),
+                        "NA".to_string(),
+                        "NA".to_string(),
+                        "NA".to_string(),
+                        "NA".to_string(),
+                    )
+                };
+            out.push_str(&format!(
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                summary.workload,
+                summary.start,
+                summary.end,
+                summary.values,
+                config.label,
+                config.j,
+                config.d,
+                total_bits,
+                bits_per_value,
+                wins,
+                ties,
+                losses,
+                win_percent,
+                tie_percent,
+                loss_percent,
+                format_ratio(summary.leb128_total_bits, summary.values, 6),
+            ));
         }
-        out.push_str(&format!(
-            ",{:.4},{:.4},{:.4},{:.4}\n",
-            s.leb128_bits, s.vlq_bits, s.elias_gamma_bits, s.elias_delta_bits
-        ));
     }
     out
 }
 
 fn render_markdown(summaries: &[SizeSummary]) -> String {
     let mut out = String::new();
-    out.push_str("# Benchmark results\n\n");
-    out.push_str("This file is generated by `scripts/reproduce_paper.sh`, which invokes `cargo run --features cli --bin lotus -- benchmark --format markdown --output docs/RESULTS.md`.\n\n");
-    out.push_str("Numbers are deterministic size statistics for repository workloads (not runtime throughput).\n\n");
-    out.push_str("| workload |");
-    for &(label, _j, _d) in demo_lotus_configs() {
-        out.push_str(&format!(" lotus {label} (bits/value) |"));
+    out.push_str("# Exact benchmark results\n\n");
+    out.push_str(
+        "Generated by `scripts/reproduce_paper.sh` from the canonical codec implementation. ",
+    );
+    out.push_str(
+        "All rows are exact interval aggregates over the complete inclusive domain shown; ",
+    );
+    out.push_str("they are not Monte Carlo estimates or sparse samples.\n\n");
+
+    out.push_str("## Average meaningful bits per value\n\n");
+    out.push_str("| domain | values |");
+    for profile in lotus::RECOMMENDED_PROFILES {
+        out.push_str(&format!(" Lotus {} |", profile.label));
     }
-    out.push_str(" LEB128 (bits/value) | VLQ (bits/value) | Elias γ (bits/value) | Elias δ (bits/value) |\n|---|");
-    for _ in demo_lotus_configs() {
+    out.push_str(" LEB128 | VLQ | Elias γ | Elias δ |\n");
+    out.push_str("|---|---:|");
+    for _ in lotus::RECOMMENDED_PROFILES {
         out.push_str("---:|");
     }
     out.push_str("---:|---:|---:|---:|\n");
-    for s in summaries {
-        out.push_str(&format!("| {} ", s.workload));
-        for c in &s.lotus {
-            out.push_str(&format!(
-                "| {} ",
-                c.bits
-                    .map(|v| format!("{v:.4}"))
-                    .unwrap_or_else(|| "NA (out of range)".to_string())
-            ));
+
+    for summary in summaries {
+        out.push_str(&format!("| `{}` | {} |", summary.workload, summary.values));
+        for config in &summary.lotus {
+            let value = config
+                .total_bits
+                .map(|total| format_ratio(total, summary.values, 6))
+                .unwrap_or_else(|| "NA".to_string());
+            out.push_str(&format!(" {value} |"));
         }
         out.push_str(&format!(
-            "| {:.4} | {:.4} | {:.4} | {:.4} |\n",
-            s.leb128_bits, s.vlq_bits, s.elias_gamma_bits, s.elias_delta_bits
+            " {} | {} | {} | {} |\n",
+            format_ratio(summary.leb128_total_bits, summary.values, 6),
+            format_ratio(summary.vlq_total_bits, summary.values, 6),
+            format_ratio(summary.elias_gamma_total_bits, summary.values, 6),
+            format_ratio(summary.elias_delta_total_bits, summary.values, 6),
         ));
     }
+
+    out.push_str("\n## Lotus versus LEB128\n\n");
+    out.push_str(
+        "| domain | profile | wins | ties | losses | win % | tie % | loss % |\n",
+    );
+    out.push_str("|---|---|---:|---:|---:|---:|---:|---:|\n");
+    for summary in summaries {
+        for config in &summary.lotus {
+            if let Some(counts) = config.versus_leb128 {
+                out.push_str(&format!(
+                    "| `{}` | {} | {} | {} | {} | {} | {} | {} |\n",
+                    summary.workload,
+                    config.label,
+                    counts.wins,
+                    counts.ties,
+                    counts.losses,
+                    format_percent(counts.wins, summary.values),
+                    format_percent(counts.ties, summary.values),
+                    format_percent(counts.losses, summary.values),
+                ));
+            }
+        }
+    }
+
+    out.push_str("\n## Framing caveat\n\n");
+    out.push_str(
+        "Lotus figures are meaningful packed bits. Independently padding every codeword ",
+    );
+    out.push_str(
+        "to a byte discards the byte-quantization advantage; use `EncodedLotus.bit_len` ",
+    );
+    out.push_str("or the streaming `BitWriter`/`BitReader` APIs.\n");
     out
 }
 
 fn run_benchmark(format: OutputFormat, output: Option<String>) -> Result<(), LotusError> {
-    let summaries = summarize_sizes(&standard_workloads());
+    let summaries = summarize_standard_domains();
     let rendered = match format {
         OutputFormat::Csv => render_csv(&summaries),
         OutputFormat::Json => serde_json::to_string_pretty(&as_json_rows(&summaries))
