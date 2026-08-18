@@ -1,25 +1,35 @@
-# Lotus whitepaper notes
+# Lotus: a parametric density-reclaiming integer codec
 
-This document summarizes the codec design rationale and mathematical intuition.
+Lotus assigns every fixed-width bitstring to a unique integer, then describes the payload width through a bounded chain of positive width fields.
 
-For reproducible empirical claims, use generated artifacts instead of fixed tables in prose:
+The maintained specification is `docs/FORMAT.md`. The central equations are:
+
+\[
+L_0(n)=\lfloor\log_2(n+2)\rfloor
+\]
+
+for the nonnegative payload, and
+
+\[
+L_{i+1}=\lfloor\log_2(L_i+1)\rfloor
+\]
+
+for positive width descriptors.
+
+For configuration `(J,d)`, the codeword length is:
+
+\[
+J+\sum_{i=0}^{d}L_i
+\]
+
+The most important complete-domain result is exact, not sampled: over all `2^32` unsigned 32-bit values, J1D2 uses fewer meaningful bits than LEB128 for 4,058,104,710 values (94.485113%), ties for 33,686,546 values, and loses for 203,176,040 values.
+
+The losses are intervals near the upper portions of LEB128 byte plateaus, not merely isolated byte-border values. The broad win comes from avoiding byte quantization.
+
+Generated evidence:
 
 - `docs/RESULTS.md`
 - `docs/results.json`
-- `target/criterion/` (local throughput runs)
+- `docs/demo-fixture.js`
 
-## Scope
-
-- Canonical mapping from fixed-width bitstrings to consecutive integer ranges.
-- Tiered length-chain encoding with jumpstarter anchor.
-- Configuration trade-offs for `(J, d)`.
-
-## Reproducibility policy
-
-Any numeric claim in this repository should be traceable to:
-
-1. source workloads in `src/metrics.rs`,
-2. generated artifacts in `docs/RESULTS.md` / `docs/results.json`, or
-3. locally produced Criterion reports.
-
-Historical narrative text from earlier prototype phases has been intentionally removed to avoid stale or non-reproducible benchmark claims.
+Runtime throughput is measured separately with Criterion because speed depends on hardware and toolchain.
