@@ -1,27 +1,38 @@
-use lotus::{BitReader, BitWriter, LOTUS_J3D1, lotus_decode_u64, lotus_encode_u64_framed};
+use lotus::{
+    BitReader, BitWriter, LOTUS_DENSE_U64, lotus_decode_from_reader,
+    lotus_encode_into_writer,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let values = [3u64, 42, 127, 128, 65_535, u32::MAX as u64];
+    let config = LOTUS_DENSE_U64;
     let mut writer = BitWriter::new();
-    for value in [1u64, 5, 9] {
-        let encoded = lotus_encode_u64_framed(value, LOTUS_J3D1.0, LOTUS_J3D1.1)?;
-        for byte in encoded.bytes {
-            writer.write_bits(byte as u64, 8)?;
-        }
+    for value in values {
+        lotus_encode_into_writer(
+            value,
+            config.jumpstarter_bits,
+            config.tiers,
+            &mut writer,
+        )?;
     }
+    let meaningful_bits = writer.bits_written();
     let bytes = writer.into_bytes();
 
-    // Demonstrate value-wise decoding from known frame boundaries.
-    let mut cursor_bits = 0usize;
-    for _ in 0..3 {
-        let byte_offset = cursor_bits / 8;
-        let (value, consumed) =
-            lotus_decode_u64(&bytes[byte_offset..], LOTUS_J3D1.0, LOTUS_J3D1.1)?;
-        println!("decoded {value} (consumed {consumed} bits)");
-        cursor_bits += consumed;
-    }
-
-    // BitReader can be used directly when integrating with custom framing.
     let mut reader = BitReader::new(&bytes);
-    let _first_16_bits = reader.read_bits(16)?;
+    for expected in values {
+        let (decoded, _) = lotus_decode_from_reader(
+            &mut reader,
+            config.jumpstarter_bits,
+            config.tiers,
+        )?;
+        assert_eq!(decoded, expected);
+    }
+    assert_eq!(reader.bits_consumed(), meaningful_bits);
+    println!(
+        "packed {} values into {} meaningful bits ({} backing bytes)",
+        values.len(),
+        meaningful_bits,
+        bytes.len()
+    );
     Ok(())
 }
