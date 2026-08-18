@@ -3,184 +3,170 @@ use lotus::metrics::{
     elias_delta_decode, elias_delta_encode, elias_gamma_decode, elias_gamma_encode, leb128_decode,
     leb128_encode, standard_workloads, vlq_decode, vlq_encode,
 };
-use lotus::{LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, lotus_decode_u64, lotus_encode_u64};
+use lotus::{
+    BitReader, BitWriter, RECOMMENDED_PROFILES, lotus_decode_from_reader, lotus_encode_into_writer,
+    lotus_encoded_bit_len,
+};
 
-/// Lotus configurations benchmarked. Each is `(label, j, d)`.
-const LOTUS_CONFIGS: &[(&str, usize, usize)] = &[
-    ("J1D2", LOTUS_J1D2.0, LOTUS_J1D2.1),
-    ("J2D1", LOTUS_J2D1.0, LOTUS_J2D1.1),
-    ("J3D1", LOTUS_J3D1.0, LOTUS_J3D1.1),
-    ("J3D2", 3, 2),
-];
-
-/// Values from `values` that Lotus `(j, d)` can represent, in source order.
-fn lotus_encodable(values: &[u64], j: usize, d: usize) -> Vec<u64> {
+fn profile_covers(values: &[u64], j: usize, d: usize) -> bool {
     values
         .iter()
-        .copied()
-        .filter(|v| lotus_encode_u64(*v, j, d).is_ok())
-        .collect()
+        .all(|&value| lotus_encoded_bit_len(value, j, d).is_ok())
 }
-
-// ---------------------------------------------------------------------------
-// Encode throughput
-// ---------------------------------------------------------------------------
 
 fn bench_encode(c: &mut Criterion, name: &str, values: &[u64]) {
     let mut group = c.benchmark_group(format!("encode_{name}"));
     group.throughput(Throughput::Elements(values.len() as u64));
 
-    for &(label, j, d) in LOTUS_CONFIGS {
-        let encodable = lotus_encodable(values, j, d);
-        if encodable.is_empty() {
+    for profile in RECOMMENDED_PROFILES {
+        let j = profile.config.jumpstarter_bits;
+        let d = profile.config.tiers;
+        if !profile_covers(values, j, d) {
             continue;
         }
-        group.bench_with_input(BenchmarkId::new("Lotus", label), &encodable, |b, v| {
+        group.bench_with_input(BenchmarkId::new("LotusPacked", profile.label), values, |b, v| {
             b.iter(|| {
-                let mut acc = 0u64;
-                for &x in v {
-                    acc = acc.wrapping_add(lotus_encode_u64(x, j, d).unwrap().len() as u64);
+                let mut writer = BitWriter::new();
+                for &value in v {
+                    lotus_encode_into_writer(value, j, d, &mut writer).unwrap();
                 }
-                criterion::black_box(acc);
+                criterion::black_box(writer.into_bytes());
             });
         });
     }
 
     group.bench_function("LEB128", |b| {
         b.iter(|| {
-            let mut acc = 0u64;
-            for &x in values {
-                acc = acc.wrapping_add(leb128_encode(x).len() as u64);
+            let mut total = 0usize;
+            for &value in values {
+                total = total.wrapping_add(leb128_encode(value).len());
             }
-            criterion::black_box(acc);
+            criterion::black_box(total);
         });
     });
 
     group.bench_function("VLQ", |b| {
         b.iter(|| {
-            let mut acc = 0u64;
-            for &x in values {
-                acc = acc.wrapping_add(vlq_encode(x).len() as u64);
+            let mut total = 0usize;
+            for &value in values {
+                total = total.wrapping_add(vlq_encode(value).len());
             }
-            criterion::black_box(acc);
+            criterion::black_box(total);
         });
     });
 
     group.bench_function("EliasGamma", |b| {
         b.iter(|| {
-            let mut acc = 0u64;
-            for &x in values {
-                acc = acc.wrapping_add(elias_gamma_encode(x).len() as u64);
+            let mut total = 0usize;
+            for &value in values {
+                total = total.wrapping_add(elias_gamma_encode(value).len());
             }
-            criterion::black_box(acc);
+            criterion::black_box(total);
         });
     });
 
     group.bench_function("EliasDelta", |b| {
         b.iter(|| {
-            let mut acc = 0u64;
-            for &x in values {
-                acc = acc.wrapping_add(elias_delta_encode(x).len() as u64);
+            let mut total = 0usize;
+            for &value in values {
+                total = total.wrapping_add(elias_delta_encode(value).len());
             }
-            criterion::black_box(acc);
+            criterion::black_box(total);
         });
     });
 
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Decode throughput
-// ---------------------------------------------------------------------------
-
 fn bench_decode(c: &mut Criterion, name: &str, values: &[u64]) {
     let mut group = c.benchmark_group(format!("decode_{name}"));
     group.throughput(Throughput::Elements(values.len() as u64));
 
-    // Lotus: pre-encode each value into its own byte buffer, then decode them.
-    for &(label, j, d) in LOTUS_CONFIGS {
-        let encodable = lotus_encodable(values, j, d);
-        if encodable.is_empty() {
+    for profile in RECOMMENDED_PROFILES {
+        let j = profile.config.jumpstarter_bits;
+        let d = profile.config.tiers;
+        if !profile_covers(values, j, d) {
             continue;
         }
-        let encoded: Vec<Vec<u8>> = encodable
-            .iter()
-            .map(|&v| lotus_encode_u64(v, j, d).unwrap())
-            .collect();
-        group.bench_with_input(BenchmarkId::new("Lotus", label), &encoded, |b, enc| {
-            b.iter(|| {
-                let mut acc = 0u64;
-                for bytes in enc {
-                    acc = acc.wrapping_add(lotus_decode_u64(bytes, j, d).unwrap().0);
-                }
-                criterion::black_box(acc);
-            });
-        });
+
+        let mut writer = BitWriter::new();
+        for &value in values {
+            lotus_encode_into_writer(value, j, d, &mut writer).unwrap();
+        }
+        let encoded = writer.into_bytes();
+
+        group.bench_with_input(
+            BenchmarkId::new("LotusPacked", profile.label),
+            &encoded,
+            |b, bytes| {
+                b.iter(|| {
+                    let mut reader = BitReader::new(bytes);
+                    let mut checksum = 0u64;
+                    for _ in values {
+                        checksum = checksum
+                            .wrapping_add(lotus_decode_from_reader(&mut reader, j, d).unwrap().0);
+                    }
+                    criterion::black_box(checksum);
+                });
+            },
+        );
     }
 
-    // LEB128
-    {
-        let encoded: Vec<Vec<u8>> = values.iter().map(|&v| leb128_encode(v)).collect();
-        group.bench_function("LEB128", |b| {
-            b.iter(|| {
-                let mut acc = 0u64;
-                for bytes in &encoded {
-                    acc = acc.wrapping_add(leb128_decode(bytes).unwrap().0);
-                }
-                criterion::black_box(acc);
-            });
+    let leb = values
+        .iter()
+        .map(|&value| leb128_encode(value))
+        .collect::<Vec<_>>();
+    group.bench_function("LEB128", |b| {
+        b.iter(|| {
+            let mut checksum = 0u64;
+            for bytes in &leb {
+                checksum = checksum.wrapping_add(leb128_decode(bytes).unwrap().0);
+            }
+            criterion::black_box(checksum);
         });
-    }
+    });
 
-    // VLQ
-    {
-        let encoded: Vec<Vec<u8>> = values.iter().map(|&v| vlq_encode(v)).collect();
-        group.bench_function("VLQ", |b| {
-            b.iter(|| {
-                let mut acc = 0u64;
-                for bytes in &encoded {
-                    acc = acc.wrapping_add(vlq_decode(bytes).unwrap().0);
-                }
-                criterion::black_box(acc);
-            });
+    let vlq = values
+        .iter()
+        .map(|&value| vlq_encode(value))
+        .collect::<Vec<_>>();
+    group.bench_function("VLQ", |b| {
+        b.iter(|| {
+            let mut checksum = 0u64;
+            for bytes in &vlq {
+                checksum = checksum.wrapping_add(vlq_decode(bytes).unwrap().0);
+            }
+            criterion::black_box(checksum);
         });
-    }
+    });
 
-    // Elias gamma (max representable value is u64::MAX - 1)
-    {
-        let gamma_values: Vec<u64> = values.iter().copied().map(|v| v % u64::MAX).collect();
-        let encoded: Vec<Vec<u8>> = gamma_values
-            .iter()
-            .map(|&v| elias_gamma_encode(v))
-            .collect();
-        group.bench_function("EliasGamma", |b| {
-            b.iter(|| {
-                let mut acc = 0u64;
-                for bytes in &encoded {
-                    acc = acc.wrapping_add(elias_gamma_decode(bytes).unwrap().0);
-                }
-                criterion::black_box(acc);
-            });
+    let gamma = values
+        .iter()
+        .map(|&value| elias_gamma_encode(value))
+        .collect::<Vec<_>>();
+    group.bench_function("EliasGamma", |b| {
+        b.iter(|| {
+            let mut checksum = 0u64;
+            for bytes in &gamma {
+                checksum = checksum.wrapping_add(elias_gamma_decode(bytes).unwrap().0);
+            }
+            criterion::black_box(checksum);
         });
-    }
+    });
 
-    // Elias delta (max representable value is u64::MAX - 1)
-    {
-        let delta_values: Vec<u64> = values.iter().copied().map(|v| v % u64::MAX).collect();
-        let encoded: Vec<Vec<u8>> = delta_values
-            .iter()
-            .map(|&v| elias_delta_encode(v))
-            .collect();
-        group.bench_function("EliasDelta", |b| {
-            b.iter(|| {
-                let mut acc = 0u64;
-                for bytes in &encoded {
-                    acc = acc.wrapping_add(elias_delta_decode(bytes).unwrap().0);
-                }
-                criterion::black_box(acc);
-            });
+    let delta = values
+        .iter()
+        .map(|&value| elias_delta_encode(value))
+        .collect::<Vec<_>>();
+    group.bench_function("EliasDelta", |b| {
+        b.iter(|| {
+            let mut checksum = 0u64;
+            for bytes in &delta {
+                checksum = checksum.wrapping_add(elias_delta_decode(bytes).unwrap().0);
+            }
+            criterion::black_box(checksum);
         });
-    }
+    });
 
     group.finish();
 }
