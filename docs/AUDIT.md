@@ -1,52 +1,38 @@
-# Maintainer Audit (trust and release readiness)
+# Canonical codec audit
 
-Date: 2026-03-15
+Date: 2026-08-18
 
-This audit ranks issues by **severity** and **user trust impact**.
+## Finding
 
-## Critical
+The repository had accumulated three subtly different definitions of Lotus:
 
-1. **Benchmark evidence was hardcoded and non-reproducible**
-   - `scripts/reproduce_paper.sh` previously wrote fixed markdown numbers without deriving them from benchmark code.
-   - README and docs presented snapshot tables as measured evidence.
-   - Impact: direct credibility loss.
+1. the original whitepaper's nonnegative payload plus positive width-descriptor mapping,
+2. a shifted implementation that applied `value + 1` before the payload mapping,
+3. a later implementation that reused the nonnegative mapping for positive descriptors while retaining a stale range recurrence.
 
-2. **Repository metadata used placeholder URLs**
-   - `Cargo.toml` contained `example/...` repository/homepage/docs links.
-   - Impact: crate presentation looked templated/fabricated.
+Benchmarks, tests, examples, and the HTML demo then sampled or duplicated different pieces of those definitions. The approximately 95% uniform-u32 result was real under the original specification, but the repository no longer proved or implemented that exact codec consistently.
 
-## High
+## Resolution
 
-3. **API ambiguity for bit-oriented framing**
-   - Core encoder returned `Vec<u8>` with no explicit bit length in type; this risks framing confusion when composing streams.
+Version 0.2 establishes one wire format:
 
-4. **CI over-claimed guarantees**
-   - Workflow posted benchmark comments and deployed pages directly from CI while benchmark artifacts were not generated truthfully.
+- nonnegative payload width: `floor(log2(n + 2))`,
+- positive descriptor width: `floor(log2(v + 1))`,
+- range derivation from the same positive descriptor mapping,
+- no compatibility decoder for prototype byte layouts.
 
-5. **Docs drift and conflicting benchmark narratives**
-   - README/BENCHMARKS/RESULTS/WHITEPAPER contained inconsistent and partially unverifiable figures.
+`src/lib.rs` is the sole implementation source. `src/metrics.rs`, the CLI, Criterion benchmarks, examples, generated results, and the HTML demo all consume the same named profile frontier.
 
-## Medium
+## Evidence hardening
 
-6. **Dependency hygiene**
-   - CLI dependencies (`clap`, `hex`) were always included in main dependency graph.
+- Complete u32 and u64 claims use exact interval aggregation, not sparse samples.
+- Fixed regression totals pin strict wins, ties, losses, and aggregate bits.
+- Generated Markdown, JSON, and the demo fixture are regenerated together.
+- The HTML demo verifies its JavaScript port against a Rust-generated boundary oracle.
+- Streaming examples and benchmarks compose codewords with `BitWriter`/`BitReader`, preserving meaningful bits across byte boundaries.
 
-7. **Small-int fast path surfaced as public API but asymmetrically documented**
-   - Exposed optimization with no matching decode API created format/expectation ambiguity.
+## Remaining research, not correctness debt
 
-8. **Malformed-input and adversarial test coverage gaps**
-   - Baseline tests existed, but lacked stronger truncation/trailing-bit/framing adversarial checks.
-
-## Implemented priorities in this pass
-
-1. Restore benchmark trust via generated artifacts + drift checks.
-2. Fix metadata professionalism and docs consistency.
-3. Clarify API framing with explicit encoded representation.
-4. Tighten CI to reflect verifiable guarantees.
-5. Add additional correctness/adversarial tests.
-
-## Remaining follow-up candidates
-
-- Add decode support for `BigUint` (currently encode-only API).
-- Add cargo-fuzz targets and seed corpus committed under `fuzz/`.
-- Add scheduled benchmark workflow for long-running throughput publication.
+- Profile selection for empirical non-uniform distributions can be built on the existing generic `(J,d)` API.
+- A future escape mode could make the family formally unbounded beyond the configured envelope.
+- BigUint decoding remains a possible extension; BigUint encoding already uses the canonical mapping.
