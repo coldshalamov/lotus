@@ -1,47 +1,79 @@
-# Lotus Rust API
+# API guide
 
-## Core encode/decode
+## Recommended profile
 
-- `lotus_encode_u64(value, j_bits, tiers) -> Result<Vec<u8>, LotusError>`
-  - Backward-compatible convenience API.
-  - Returns bytes only.
+`LOTUS_DENSE_U64` (`J1D2`) is the default minimum-bit profile for arbitrary `u64` values.
 
-- `lotus_encode_u64_framed(value, j_bits, tiers) -> Result<EncodedLotus, LotusError>`
-  - Preferred API for stream/framing code.
-  - Returns:
-    - `bytes`: packed MSB-first bitstream
-    - `bit_len`: exact number of meaningful bits
+```rust
+use lotus::{LOTUS_DENSE_U64, lotus_decode_u64, lotus_encode_u64_framed};
 
-- `lotus_decode_u64(bytes, j_bits, tiers) -> Result<(u64, usize), LotusError>`
-  - Returns decoded value plus consumed bits.
+let config = LOTUS_DENSE_U64;
+let encoded = lotus_encode_u64_framed(
+    42,
+    config.jumpstarter_bits,
+    config.tiers,
+)?;
 
-## Bit-level framing semantics
+let (value, consumed_bits) = lotus_decode_u64(
+    &encoded.bytes,
+    config.jumpstarter_bits,
+    config.tiers,
+)?;
 
-Lotus is bit-oriented, not byte-oriented:
+assert_eq!(value, 42);
+assert_eq!(consumed_bits, encoded.bit_len);
+# Ok::<(), lotus::LotusError>(())
+```
 
-- Final encoded byte may include trailing zero padding bits.
-- `EncodedLotus.bit_len` (or decode's consumed bits) is authoritative for framing.
-- Extra trailing bytes are ignored by single-value decode unless your protocol forbids them.
+## Packed streams
 
-For multi-value streams, delimit using the returned/recorded bit lengths.
+Lotus is a bitstream codec. Do not concatenate the padded `Vec<u8>` returned for independent values.
 
-## Errors
+```rust
+use lotus::{
+    BitReader, BitWriter, LOTUS_DENSE_U64,
+    lotus_decode_from_reader, lotus_encode_into_writer,
+};
 
-`LotusError` variants:
+let config = LOTUS_DENSE_U64;
+let values = [3u64, 42, 127, 128];
 
-- `JumpstarterOverflow`
-- `UnexpectedEof`
-- `InvalidEncoding`
-- `ValueTooLarge`
+let mut writer = BitWriter::new();
+for value in values {
+    lotus_encode_into_writer(
+        value,
+        config.jumpstarter_bits,
+        config.tiers,
+        &mut writer,
+    )?;
+}
+let meaningful_bits = writer.bits_written();
+let bytes = writer.into_bytes();
 
-## Features
+let mut reader = BitReader::new(&bytes);
+for expected in values {
+    let (decoded, _) = lotus_decode_from_reader(
+        &mut reader,
+        config.jumpstarter_bits,
+        config.tiers,
+    )?;
+    assert_eq!(decoded, expected);
+}
+assert_eq!(reader.bits_consumed(), meaningful_bits);
+# Ok::<(), lotus::LotusError>(())
+```
 
-- `small-int-fastpath`: internal optimization surface (non-default).
-- `bigint`: enables `lotus_encode_biguint`.
-- `cli`: enables the `lotus` binary and CLI-only dependencies (`clap`, `hex`, `serde`, `serde_json`).
+## Profile selection
 
-## Presets
+- `LOTUS_TINY` / J1D1: values through 125.
+- `LOTUS_COMPACT_31` / J2D1: values through `2^31 - 3`.
+- `LOTUS_DENSE_U64` / J1D2: minimum-bit full-`u64` profile.
+- `LOTUS_FAST_U64` / J3D1: one-tier full-`u64` profile.
 
-- `LOTUS_J2D1`
-- `LOTUS_J1D2`
-- `LOTUS_J3D1`
+`RECOMMENDED_PROFILES` contains this frontier and is shared by metrics, benchmarks, examples, and the generated demo.
+
+## Exact sizing
+
+`lotus_encoded_bit_len` computes meaningful bits without allocating. `EncodedLotus.bit_len` is authoritative for a real standalone encode.
+
+The length of the backing byte vector is not a compression statistic unless the protocol intentionally byte-aligns every value.
