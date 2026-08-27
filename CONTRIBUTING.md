@@ -1,8 +1,6 @@
 # Contributing to Lotus
 
-Thanks for contributing.
-
-## Required checks before PR
+## Required checks
 
 ```bash
 cargo fmt --all --check
@@ -12,18 +10,24 @@ cargo test --all-features
 scripts/check_generated.sh
 ```
 
-If you changed benchmark workloads or benchmark-report formatting, include regenerated:
+If codec math, profile metadata, benchmark rendering, or demo behavior changes, run:
+
+```bash
+scripts/reproduce_paper.sh
+```
+
+and commit all three generated artifacts:
 
 - `docs/RESULTS.md`
 - `docs/results.json`
+- `docs/demo-fixture.js`
 
-## Benchmark claim policy
+## Format discipline
 
-Do not hand-edit benchmark result tables presented as measured output.
-All benchmark-size claims must come from generated artifacts.
+`docs/FORMAT.md` is normative and `src/lib.rs` is the implementation source of truth.
 
-## Design policy
+Do not add alternate payload/descriptor mappings, compatibility branches for prototype bytes, or a second range recurrence. A wire-format change must update the specification, exact-domain regressions, generated evidence, and demo fixture in the same pull request.
 
-- Preserve Lotus mapping/invariants unless correctness evidence requires changes.
-- Prefer explicit framing (`bit_len`) in external protocol examples.
-- Keep the core library free of unnecessary CLI dependencies.
+## Framing discipline
+
+Lotus is bit-oriented. Use `EncodedLotus.bit_len` or the streaming `BitWriter`/`BitReader` APIs when measuring or composing codewords. Per-value padded byte lengths are a different protocol measurement and must be labeled as such.

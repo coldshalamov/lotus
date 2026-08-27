@@ -1,12 +1,12 @@
 [package]
 name = "lotus"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Lotus maintainers"]
-description = "Parametric bit-level integer codec with tiered self-delimiting headers"
+description = "Canonical parametric bit-level integer codec with tiered self-delimiting headers"
 license = "Apache-2.0"
-repository = "https://github.com/lotus-codec/lotus"
-homepage = "https://github.com/lotus-codec/lotus"
+repository = "https://github.com/coldshalamov/lotus"
+homepage = "https://github.com/coldshalamov/lotus"
 documentation = "https://docs.rs/lotus"
 keywords = ["codec", "compression", "integer", "bitstream", "varint"]
 categories = ["compression", "encoding"]
@@ -15,7 +15,6 @@ rust-version = "1.85"
 
 [features]
 default = []
-small-int-fastpath = []
 bigint = ["dep:num-bigint", "dep:num-traits"]
 cli = ["dep:clap", "dep:hex", "dep:serde", "dep:serde_json"]
 

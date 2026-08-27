@@ -1,123 +1,321 @@
-﻿use crate::{LotusError, lotus_decode_u64, lotus_encode_u64};
+//! Deterministic codec metrics and reference comparator implementations.
+//!
+//! Size evidence uses exact interval aggregation. It never substitutes sparse
+//! samples for claims about complete integer domains.
 
-/// A named integer-encoding workload used for deterministic size statistics.
+use crate::{BitReader, BitWriter, LotusError, RECOMMENDED_PROFILES, lotus_encoded_bit_len};
+use std::collections::BTreeSet;
+
+/// A finite workload used only for runtime Criterion benchmarks.
 #[derive(Debug, Clone)]
 pub struct Workload {
     pub name: &'static str,
     pub values: Vec<u64>,
 }
 
-/// Result of measuring one Lotus `(J, d)` configuration over a workload.
-///
-/// `bits` is `None` when some workload values fall outside the configuration's
-/// representable range.
+/// An inclusive uniform integer domain used for exact size statistics.
+#[derive(Debug, Clone, Copy)]
+pub struct UniformDomain {
+    pub name: &'static str,
+    pub start: u64,
+    pub end: u64,
+}
+
+impl UniformDomain {
+    pub fn values(self) -> u128 {
+        self.end as u128 - self.start as u128 + 1
+    }
+}
+
+/// Exact strict-win/tie/loss counts against LEB128.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComparisonCounts {
+    pub wins: u128,
+    pub ties: u128,
+    pub losses: u128,
+}
+
+/// Exact aggregate for one recommended Lotus profile.
 #[derive(Debug, Clone)]
 pub struct LotusConfigResult {
     pub label: &'static str,
     pub j: usize,
     pub d: usize,
-    pub bits: Option<f64>,
+    pub total_bits: Option<u128>,
+    pub versus_leb128: Option<ComparisonCounts>,
 }
 
-/// Deterministic size statistics for one workload across Lotus configs and
-/// reference varint codecs. All figures are **bits per value**.
+/// Exact aggregate totals over one domain.
 #[derive(Debug, Clone)]
 pub struct SizeSummary {
     pub workload: &'static str,
+    pub start: u64,
+    pub end: u64,
+    pub values: u128,
     pub lotus: Vec<LotusConfigResult>,
-    pub leb128_bits: f64,
-    pub vlq_bits: f64,
-    pub elias_gamma_bits: f64,
-    pub elias_delta_bits: f64,
+    pub leb128_total_bits: u128,
+    pub vlq_total_bits: u128,
+    pub elias_gamma_total_bits: u128,
+    pub elias_delta_total_bits: u128,
 }
 
-/// The Lotus `(J, d)` configurations surfaced in docs and the interactive demo.
+/// Domains used by generated documentation.
 ///
-/// These are the configs whose density trade-offs are most instructive:
-/// small/large jumpstarter and single/double tier.
-pub fn demo_lotus_configs() -> &'static [(&'static str, usize, usize)] {
+/// The u32 and u64 rows are exact across the complete unsigned domains.
+pub fn standard_domains() -> &'static [UniformDomain] {
     &[
-        ("J1D2", 1, 2),
-        ("J2D1", 2, 1),
-        ("J3D1", 3, 1),
-        ("J3D2", 3, 2),
+        UniformDomain {
+            name: "tiny",
+            start: 0,
+            end: 125,
+        },
+        UniformDomain {
+            name: "small_u8",
+            start: 0,
+            end: u8::MAX as u64,
+        },
+        UniformDomain {
+            name: "medium_1m",
+            start: 0,
+            end: 1_000_000,
+        },
+        UniformDomain {
+            name: "uniform_u32",
+            start: 0,
+            end: u32::MAX as u64,
+        },
+        UniformDomain {
+            name: "uniform_u64",
+            start: 0,
+            end: u64::MAX,
+        },
     ]
 }
 
+/// Finite deterministic workloads used by Criterion.
+///
+/// These are intentionally separate from the exact documentation domains so
+/// benchmark smoke tests stay fast and size claims stay exact.
 pub fn standard_workloads() -> Vec<Workload> {
+    let mut large32 = Vec::with_capacity(4096);
+    let mut x32 = 0x9e37_79b9u32;
+    for _ in 0..4096 {
+        x32 = x32.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        large32.push(u64::from(x32));
+    }
+
+    let mut large64 = Vec::with_capacity(4096);
+    let mut x64 = 0x9e37_79b9_7f4a_7c15u64;
+    for _ in 0..4096 {
+        x64 = x64
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        large64.push(x64);
+    }
+
     vec![
+        Workload {
+            name: "tiny",
+            values: (0u64..=125).collect(),
+        },
         Workload {
             name: "small",
             values: (0u64..=255).collect(),
         },
         Workload {
             name: "medium",
-            values: (0u64..1_000_000).step_by(10_000).collect(),
+            values: (0u64..=1_000_000).step_by(1_000).collect(),
         },
         Workload {
             name: "large32",
-            values: (0u64..4_000_000_000).step_by(25_000_000).collect(),
+            values: large32,
+        },
+        Workload {
+            name: "large64",
+            values: large64,
         },
     ]
 }
 
+fn transition_points(domain: UniformDomain) -> Vec<u128> {
+    let start = domain.start as u128;
+    let end_exclusive = domain.end as u128 + 1;
+    let mut points = BTreeSet::new();
+    points.insert(start);
+    points.insert(end_exclusive);
+
+    // All relevant code lengths are constant between these boundaries:
+    // - Lotus payload-width transitions: 2^k - 2
+    // - Elias transitions:              2^k - 1
+    // - LEB128/VLQ transitions:         2^(7k)
+    for exponent in 1..=64u32 {
+        let power = 1u128 << exponent;
+        for point in [power.saturating_sub(2), power.saturating_sub(1)] {
+            if point > start && point < end_exclusive {
+                points.insert(point);
+            }
+        }
+        if exponent % 7 == 0 && power > start && power < end_exclusive {
+            points.insert(power);
+        }
+    }
+
+    points.into_iter().collect()
+}
+
+#[derive(Debug)]
+struct LotusAccumulator {
+    total_bits: u128,
+    comparison: ComparisonCounts,
+    valid: bool,
+}
+
+pub fn summarize_uniform_domain(domain: UniformDomain) -> SizeSummary {
+    let mut lotus = RECOMMENDED_PROFILES
+        .iter()
+        .map(|_| LotusAccumulator {
+            total_bits: 0,
+            comparison: ComparisonCounts {
+                wins: 0,
+                ties: 0,
+                losses: 0,
+            },
+            valid: true,
+        })
+        .collect::<Vec<_>>();
+
+    let mut leb128_total_bits = 0u128;
+    let mut vlq_total_bits = 0u128;
+    let mut elias_gamma_total_bits = 0u128;
+    let mut elias_delta_total_bits = 0u128;
+
+    let points = transition_points(domain);
+    for pair in points.windows(2) {
+        let interval_start = pair[0];
+        let interval_end = pair[1];
+        let count = interval_end - interval_start;
+        let value = u64::try_from(interval_start).expect("domain interval fits u64");
+
+        let leb_bits = leb128_bits(value) as u128;
+        leb128_total_bits += count * leb_bits;
+        vlq_total_bits += count * vlq_bits(value) as u128;
+        elias_gamma_total_bits += count * elias_gamma_bits(value) as u128;
+        elias_delta_total_bits += count * elias_delta_len(value) as u128;
+
+        for (profile, acc) in RECOMMENDED_PROFILES.iter().zip(&mut lotus) {
+            if !acc.valid {
+                continue;
+            }
+            match lotus_encoded_bit_len(
+                value,
+                profile.config.jumpstarter_bits,
+                profile.config.tiers,
+            ) {
+                Ok(bits) => {
+                    let bits = bits as u128;
+                    acc.total_bits += count * bits;
+                    if bits < leb_bits {
+                        acc.comparison.wins += count;
+                    } else if bits == leb_bits {
+                        acc.comparison.ties += count;
+                    } else {
+                        acc.comparison.losses += count;
+                    }
+                }
+                Err(_) => {
+                    acc.valid = false;
+                }
+            }
+        }
+    }
+
+    let lotus = RECOMMENDED_PROFILES
+        .iter()
+        .zip(lotus)
+        .map(|(profile, acc)| LotusConfigResult {
+            label: profile.label,
+            j: profile.config.jumpstarter_bits,
+            d: profile.config.tiers,
+            total_bits: acc.valid.then_some(acc.total_bits),
+            versus_leb128: acc.valid.then_some(acc.comparison),
+        })
+        .collect();
+
+    SizeSummary {
+        workload: domain.name,
+        start: domain.start,
+        end: domain.end,
+        values: domain.values(),
+        lotus,
+        leb128_total_bits,
+        vlq_total_bits,
+        elias_gamma_total_bits,
+        elias_delta_total_bits,
+    }
+}
+
+pub fn summarize_uniform_domains(domains: &[UniformDomain]) -> Vec<SizeSummary> {
+    domains
+        .iter()
+        .copied()
+        .map(summarize_uniform_domain)
+        .collect()
+}
+
+pub fn summarize_standard_domains() -> Vec<SizeSummary> {
+    summarize_uniform_domains(standard_domains())
+}
+
 // ---------------------------------------------------------------------------
-// LEB128 (little-endian base-128 varint)
+// LEB128
 // ---------------------------------------------------------------------------
 
-/// Encode `value` using LEB128 (little-endian base-128), as used by protobuf /
-/// DWARF / WebAssembly.
 pub fn leb128_encode(mut value: u64) -> Vec<u8> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(10);
     loop {
         let mut byte = (value & 0x7f) as u8;
         value >>= 7;
         if value != 0 {
             byte |= 0x80;
-            out.push(byte);
-        } else {
-            out.push(byte);
-            break;
+        }
+        out.push(byte);
+        if value == 0 {
+            return out;
         }
     }
-    out
 }
 
-/// Decode a single LEB128 value from `bytes`.
-///
-/// Returns `(value, bytes_consumed)`.
 pub fn leb128_decode(bytes: &[u8]) -> Result<(u64, usize), LotusError> {
-    let mut value = 0u64;
+    let mut value = 0u128;
     let mut shift = 0u32;
-    for (i, &byte) in bytes.iter().enumerate() {
-        if shift >= 64 {
+
+    for (index, &byte) in bytes.iter().enumerate() {
+        if shift >= 70 {
             return Err(LotusError::ValueTooLarge);
         }
-        value |= u64::from(byte & 0x7f) << shift;
-        let consumed = i + 1;
+        value |= u128::from(byte & 0x7f) << shift;
+        if value > u64::MAX as u128 {
+            return Err(LotusError::ValueTooLarge);
+        }
         if byte & 0x80 == 0 {
-            return Ok((value, consumed));
+            return Ok((value as u64, index + 1));
         }
         shift += 7;
     }
     Err(LotusError::UnexpectedEof)
 }
 
-/// Bit length of `leb128_encode(value)` without allocating.
 pub fn leb128_bits(value: u64) -> usize {
-    let bit_len = 64 - value.leading_zeros() as usize;
-    let bytes = bit_len.div_ceil(7).max(1);
-    bytes * 8
+    let bit_len = (u64::BITS - value.leading_zeros()) as usize;
+    bit_len.div_ceil(7).max(1) * 8
 }
 
 // ---------------------------------------------------------------------------
-// VLQ (big-endian base-128 varint, MIDI / Bitcoin style)
+// Big-endian base-128 VLQ
 // ---------------------------------------------------------------------------
 
-/// Encode `value` using big-endian base-128 VLQ. The most significant 7-bit
-/// group comes first; every byte except the last has the continuation bit set.
 pub fn vlq_encode(mut value: u64) -> Vec<u8> {
-    let mut groups: Vec<u8> = Vec::new();
+    let mut groups = Vec::with_capacity(10);
     loop {
         groups.push((value & 0x7f) as u8);
         value >>= 7;
@@ -133,215 +331,174 @@ pub fn vlq_encode(mut value: u64) -> Vec<u8> {
     groups
 }
 
-/// Decode a single big-endian base-128 VLQ value from `bytes`.
-///
-/// Returns `(value, bytes_consumed)`.
 pub fn vlq_decode(bytes: &[u8]) -> Result<(u64, usize), LotusError> {
-    let mut value = 0u64;
-    for (i, &byte) in bytes.iter().enumerate() {
-        if value > (u64::MAX >> 7) {
+    let mut value = 0u128;
+    for (index, &byte) in bytes.iter().enumerate() {
+        value = (value << 7) | u128::from(byte & 0x7f);
+        if value > u64::MAX as u128 {
             return Err(LotusError::ValueTooLarge);
         }
-        value = (value << 7) | u64::from(byte & 0x7f);
-        let consumed = i + 1;
         if byte & 0x80 == 0 {
-            return Ok((value, consumed));
+            return Ok((value as u64, index + 1));
+        }
+        if index >= 9 {
+            return Err(LotusError::ValueTooLarge);
         }
     }
     Err(LotusError::UnexpectedEof)
 }
 
-/// Bit length of `vlq_encode(value)` without allocating.
 pub fn vlq_bits(value: u64) -> usize {
     leb128_bits(value)
 }
 
 // ---------------------------------------------------------------------------
-// Elias gamma (bit-oriented universal code)
+// Elias gamma
 // ---------------------------------------------------------------------------
-//
-// Elias gamma encodes the positive integer x as: floor(log2(x)) zero bits,
-// followed by the binary representation of x (which begins with a 1).
-// Length = 2*floor(log2(x)) + 1.
-//
-// Lotus's public API maps a stored value `v` (v >= 0) to the coded integer
-// `x = v + 1`, mirroring the value+1 convention used inside Lotus itself.
-//
-// Because `x` must fit u64, the maximum storable value is `u64::MAX - 1`.
 
-/// Encode `value` using Elias gamma. Returns the packed MSB-first bitstream
-/// (final byte is zero-padded). Valid for `value <= u64::MAX - 1`.
+fn write_zeroes(writer: &mut BitWriter, mut count: usize) {
+    while count > 0 {
+        let chunk = count.min(u64::BITS as usize);
+        writer
+            .write_bits(0, chunk)
+            .expect("zero chunk always fits BitWriter");
+        count -= chunk;
+    }
+}
+
+fn write_u128_bits(writer: &mut BitWriter, value: u128, width: usize) {
+    if width <= u64::BITS as usize {
+        writer
+            .write_bits(value as u64, width)
+            .expect("low-width u128 value fits");
+    } else {
+        let high_width = width - u64::BITS as usize;
+        writer
+            .write_bits((value >> u64::BITS) as u64, high_width)
+            .expect("high u128 chunk fits");
+        writer
+            .write_bits(value as u64, u64::BITS as usize)
+            .expect("low u128 chunk fits");
+    }
+}
+
 pub fn elias_gamma_encode(value: u64) -> Vec<u8> {
-    use crate::BitWriter;
-    let x = value.saturating_add(1);
-    let n = 64 - x.leading_zeros() as usize; // bit length of x, n >= 1
-    let mut writer = BitWriter::new();
-    // floor(log2(x)) = n - 1 leading zero bits.
-    let _ = writer.write_bits(0, n - 1);
-    let _ = writer.write_bits(x, n);
+    let x = value as u128 + 1;
+    let bit_len = (u128::BITS - x.leading_zeros()) as usize;
+    let mut writer = BitWriter::with_capacity_bits(2 * bit_len - 1);
+    write_zeroes(&mut writer, bit_len - 1);
+    write_u128_bits(&mut writer, x, bit_len);
     writer.into_bytes()
 }
 
-/// Decode a single Elias gamma value from `bytes`.
-///
-/// Returns `(value, bits_consumed)`.
 pub fn elias_gamma_decode(bytes: &[u8]) -> Result<(u64, usize), LotusError> {
-    use crate::BitReader;
     let mut reader = BitReader::new(bytes);
-    let start = reader.bits_consumed();
-    let mut zeros = 0usize;
+    let mut zeroes = 0usize;
     loop {
         if reader.read_bits(1)? == 1 {
             break;
         }
-        zeros += 1;
-        if zeros >= 64 {
-            return Err(LotusError::InvalidEncoding);
+        zeroes += 1;
+        if zeroes > u64::BITS as usize {
+            return Err(LotusError::ValueTooLarge);
         }
     }
-    let rest = if zeros == 0 {
+
+    let lower = if zeroes == 0 {
         0
     } else {
-        reader.read_bits(zeros)?
+        reader.read_bits(zeroes)? as u128
     };
-    let x = (1u64 << zeros) | rest;
+    let x = (1u128 << zeroes) | lower;
     let value = x.checked_sub(1).ok_or(LotusError::InvalidEncoding)?;
-    let bits = reader.bits_consumed().saturating_sub(start);
-    Ok((value, bits))
+    if value > u64::MAX as u128 {
+        return Err(LotusError::ValueTooLarge);
+    }
+    Ok((value as u64, reader.bits_consumed()))
 }
 
-/// Bit length of `elias_gamma_encode(value)` without allocating.
 pub fn elias_gamma_bits(value: u64) -> usize {
-    let x = value.saturating_add(1);
-    let n = 64 - x.leading_zeros() as usize; // n >= 1
-    // 2 * (n - 1) + 1
-    2 * (n - 1) + 1
+    let x = value as u128 + 1;
+    let bit_len = (u128::BITS - x.leading_zeros()) as usize;
+    2 * bit_len - 1
 }
 
 // ---------------------------------------------------------------------------
-// Elias delta (bit-oriented universal code)
+// Elias delta
 // ---------------------------------------------------------------------------
-//
-// Elias delta encodes the positive integer x as: Elias gamma(N + 1), followed
-// by the low N bits of x, where N = floor(log2(x)).
-// Length = gamma_len(N + 1) + N.
-//
-// Same `x = value + 1` convention as Elias gamma, so the max storable value
-// is `u64::MAX - 1`.
 
-/// Encode `value` using Elias delta. Returns the packed MSB-first bitstream
-/// (final byte is zero-padded). Valid for `value <= u64::MAX - 1`.
+fn write_gamma_positive(writer: &mut BitWriter, value: u64) {
+    debug_assert!(value >= 1);
+    let bit_len = (u64::BITS - value.leading_zeros()) as usize;
+    write_zeroes(writer, bit_len - 1);
+    writer
+        .write_bits(value, bit_len)
+        .expect("positive gamma value fits");
+}
+
+fn read_gamma_positive(reader: &mut BitReader<'_>) -> Result<u64, LotusError> {
+    let mut zeroes = 0usize;
+    loop {
+        if reader.read_bits(1)? == 1 {
+            break;
+        }
+        zeroes += 1;
+        if zeroes >= u64::BITS as usize {
+            return Err(LotusError::ValueTooLarge);
+        }
+    }
+    let lower = if zeroes == 0 {
+        0
+    } else {
+        reader.read_bits(zeroes)?
+    };
+    Ok((1u64 << zeroes) | lower)
+}
+
 pub fn elias_delta_encode(value: u64) -> Vec<u8> {
-    use crate::BitWriter;
-    let x = value.saturating_add(1);
-    let n = (64 - x.leading_zeros() as usize) - 1; // N = floor(log2(x)), n >= 0
-    let np1 = (n + 1) as u64; // gamma codes N + 1
-    let l_bits = 64 - np1.leading_zeros() as usize; // bit length of N + 1, >= 1
-    let l = l_bits - 1; // L = floor(log2(N + 1)) leading zero bits
+    let x = value as u128 + 1;
+    let payload_bits = (u128::BITS - x.leading_zeros()) as usize;
+    let n = payload_bits - 1;
+    let np1 = (n + 1) as u64;
+    let prefix_bits = 2 * ((u64::BITS - np1.leading_zeros()) as usize) - 1;
 
-    let mut writer = BitWriter::new();
-    let _ = writer.write_bits(0, l);
-    let _ = writer.write_bits(np1, l_bits);
-    if n > 0 {
-        let _ = writer.write_bits(x & ((1u64 << n) - 1), n);
+    let mut writer = BitWriter::with_capacity_bits(prefix_bits + n);
+    write_gamma_positive(&mut writer, np1);
+    if n != 0 {
+        let suffix = if n == u64::BITS as usize {
+            x as u64
+        } else {
+            (x as u64) & ((1u64 << n) - 1)
+        };
+        writer.write_bits(suffix, n).expect("delta suffix fits");
     }
     writer.into_bytes()
 }
 
-/// Decode a single Elias delta value from `bytes`.
-///
-/// Returns `(value, bits_consumed)`.
 pub fn elias_delta_decode(bytes: &[u8]) -> Result<(u64, usize), LotusError> {
-    use crate::BitReader;
     let mut reader = BitReader::new(bytes);
-    let start = reader.bits_consumed();
-
-    // Decode the leading Elias gamma to recover N + 1.
-    let mut zeros = 0usize;
-    loop {
-        if reader.read_bits(1)? == 1 {
-            break;
-        }
-        zeros += 1;
-        if zeros >= 64 {
-            return Err(LotusError::InvalidEncoding);
-        }
-    }
-    let rest = if zeros == 0 {
-        0
-    } else {
-        reader.read_bits(zeros)?
-    };
-    let np1 = (1u64 << zeros) | rest; // N + 1
-    if np1 == 0 || np1 > 64 {
+    let np1 = read_gamma_positive(&mut reader)?;
+    if np1 == 0 || np1 > 65 {
         return Err(LotusError::InvalidEncoding);
     }
-    let big_n = (np1 - 1) as usize; // N = floor(log2(x))
-
-    let lower = if big_n == 0 {
+    let n = (np1 - 1) as usize;
+    let lower = if n == 0 {
         0
     } else {
-        reader.read_bits(big_n)?
+        reader.read_bits(n)? as u128
     };
-    let x = (1u64 << big_n) | lower;
+    let x = (1u128 << n) | lower;
     let value = x.checked_sub(1).ok_or(LotusError::InvalidEncoding)?;
-    let bits = reader.bits_consumed().saturating_sub(start);
-    Ok((value, bits))
-}
-
-/// Bit length of `elias_delta_encode(value)` without allocating.
-///
-/// This is the existing deterministic length helper retained for backward
-/// compatibility; it returns the length **in bits**.
-pub fn elias_delta_len(value: u64) -> usize {
-    let n = value.saturating_add(1);
-    let n_bits = 64 - n.leading_zeros() as usize;
-    let n_bits_bits = usize::BITS as usize - n_bits.leading_zeros() as usize;
-    (2 * n_bits_bits - 1) + (n_bits - 1)
-}
-
-// ---------------------------------------------------------------------------
-// Aggregation
-// ---------------------------------------------------------------------------
-
-fn average_lotus_bits(values: &[u64], j: usize, d: usize) -> Option<f64> {
-    let mut total = 0usize;
-    for &v in values {
-        let encoded = lotus_encode_u64(v, j, d).ok()?;
-        let (_, bits) = lotus_decode_u64(&encoded, j, d).ok()?;
-        total += bits;
+    if value > u64::MAX as u128 {
+        return Err(LotusError::ValueTooLarge);
     }
-    Some(total as f64 / values.len() as f64)
+    Ok((value as u64, reader.bits_consumed()))
 }
 
-pub fn summarize_sizes(workloads: &[Workload]) -> Vec<SizeSummary> {
-    workloads
-        .iter()
-        .map(|w| {
-            let n = w.values.len().max(1) as f64;
-            let leb_total: usize = w.values.iter().map(|&v| leb128_bits(v)).sum();
-            let vlq_total: usize = w.values.iter().map(|&v| vlq_bits(v)).sum();
-            let gamma_total: usize = w.values.iter().map(|&v| elias_gamma_bits(v)).sum();
-            let delta_total: usize = w.values.iter().map(|&v| elias_delta_len(v)).sum();
-
-            let lotus: Vec<LotusConfigResult> = demo_lotus_configs()
-                .iter()
-                .map(|&(label, j, d)| LotusConfigResult {
-                    label,
-                    j,
-                    d,
-                    bits: average_lotus_bits(&w.values, j, d),
-                })
-                .collect();
-
-            SizeSummary {
-                workload: w.name,
-                lotus,
-                leb128_bits: leb_total as f64 / n,
-                vlq_bits: vlq_total as f64 / n,
-                elias_gamma_bits: gamma_total as f64 / n,
-                elias_delta_bits: delta_total as f64 / n,
-            }
-        })
-        .collect()
+pub fn elias_delta_len(value: u64) -> usize {
+    let x = value as u128 + 1;
+    let n = (u128::BITS - 1 - x.leading_zeros()) as usize;
+    let np1 = n + 1;
+    let prefix_log = (usize::BITS - 1 - np1.leading_zeros()) as usize;
+    2 * prefix_log + 1 + n
 }

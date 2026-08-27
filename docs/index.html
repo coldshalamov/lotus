@@ -1,601 +1,357 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lotus — density-reclaiming integer codec</title>
-<style>
-  :root {
-    --bg: #0d1117;
-    --bg-elev: #161b22;
-    --bg-elev-2: #1c2330;
-    --border: #30363d;
-    --text: #e6edf3;
-    --text-dim: #8b949e;
-    --accent: #a371f7;
-    --accent-2: #f778ba;
-    --lotus: #ff7eb6;
-    --leb: #58a6ff;
-    --vlq: #3fb950;
-    --gamma: #f0883e;
-    --delta: #d2a8ff;
-    --good: #3fb950;
-    --bad: #f85149;
-    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: radial-gradient(1200px 600px at 70% -10%, rgba(163,113,247,0.18), transparent 60%),
-                radial-gradient(900px 500px at 0% 0%, rgba(255,126,182,0.10), transparent 55%),
-                var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    line-height: 1.55;
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
-
-  /* Header */
-  header { padding: 56px 0 32px; text-align: center; }
-  .badge-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
-  .badge {
-    font-family: var(--mono); font-size: 12px; font-weight: 600;
-    padding: 4px 10px; border-radius: 999px;
-    background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-dim);
-    display: inline-flex; align-items: center; gap: 6px;
-  }
-  .badge.ok { color: var(--good); border-color: rgba(63,185,80,0.4); }
-  .badge.err { color: var(--bad); border-color: rgba(248,81,73,0.5); }
-  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-  h1 {
-    font-size: clamp(40px, 7vw, 72px); margin: 0 0 12px; font-weight: 800;
-    letter-spacing: -0.03em;
-    background: linear-gradient(120deg, var(--accent), var(--accent-2) 60%, var(--lotus));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  .lede { font-size: 19px; color: var(--text-dim); max-width: 640px; margin: 0 auto; }
-  .lede b { color: var(--text); font-weight: 600; }
-
-  /* Cards */
-  .card {
-    background: linear-gradient(180deg, var(--bg-elev), rgba(22,27,34,0.6));
-    border: 1px solid var(--border); border-radius: 16px; padding: 24px;
-    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 32px rgba(0,0,0,0.25);
-  }
-  .stack { display: flex; flex-direction: column; gap: 20px; margin-top: 40px; }
-  .grid-2 { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-  @media (max-width: 820px) { .grid-2 { grid-template-columns: 1fr; } }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); margin: 0 0 16px; font-weight: 700; }
-
-  /* Controls */
-  label.field { display: block; margin-bottom: 14px; }
-  label.field > span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
-  input[type=number], select {
-    width: 100%; padding: 10px 12px; font-size: 15px; font-family: var(--mono);
-    background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
-    outline: none; transition: border-color 0.15s;
-  }
-  input[type=number]:focus, select:focus { border-color: var(--accent); }
-  .presets { display: flex; gap: 8px; flex-wrap: wrap; }
-  .presets button {
-    flex: 1; min-width: 64px; padding: 8px 6px; font-size: 13px; font-family: var(--mono); font-weight: 600;
-    background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); border-radius: 8px;
-    cursor: pointer; transition: all 0.15s;
-  }
-  .presets button:hover { color: var(--text); border-color: var(--accent); }
-  .presets button.active { background: rgba(163,113,247,0.15); color: var(--accent); border-color: var(--accent); }
-
-  /* Counter */
-  .counter-block { text-align: center; }
-  .counter {
-    font-family: var(--mono); font-size: clamp(48px, 11vw, 96px); font-weight: 700;
-    letter-spacing: -0.02em; line-height: 1; margin: 8px 0 4px;
-    font-variant-numeric: tabular-nums;
-    background: linear-gradient(180deg, var(--text), var(--text-dim));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  .counter-meta { font-size: 13px; color: var(--text-dim); font-family: var(--mono); margin-bottom: 18px; }
-  .btn-row { display: flex; gap: 10px; justify-content: center; }
-  .btn {
-    padding: 12px 28px; font-size: 15px; font-weight: 600; font-family: var(--sans);
-    border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
-    background: var(--bg-elev-2); color: var(--text); transition: all 0.15s;
-  }
-  .btn:hover { border-color: var(--accent); }
-  .btn.primary {
-    background: linear-gradient(120deg, var(--accent), var(--accent-2));
-    border-color: transparent; color: #fff;
-  }
-  .btn.primary:hover { filter: brightness(1.1); }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  /* SVG chart */
-  svg.chart { width: 100%; height: auto; display: block; }
-  .chart-wrap { position: relative; }
-  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 13px; }
-  .legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
-  .legend-item.active { color: var(--text); font-weight: 600; }
-  .swatch { width: 12px; height: 12px; border-radius: 3px; }
-
-  /* Breakdown */
-  .bits { display: flex; flex-wrap: wrap; gap: 3px; margin: 12px 0; font-family: var(--mono); }
-  .bit-group {
-    font-size: 13px; padding: 6px 5px; border-radius: 5px; letter-spacing: 0.08em;
-    text-align: center; min-width: 24px; transition: all 0.2s;
-  }
-  .bg-jump { background: rgba(163,113,247,0.25); color: var(--accent); border: 1px solid rgba(163,113,247,0.5); }
-  .bg-tier { background: rgba(247,120,186,0.18); color: var(--lotus); border: 1px solid rgba(247,120,186,0.4); }
-  .bg-payload { background: rgba(88,166,255,0.18); color: var(--leb); border: 1px solid rgba(88,166,255,0.4); }
-  .breakdown-legend { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
-  .breakdown-legend span { margin-right: 14px; }
-
-  /* Stat grid */
-  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
-  .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); }
-  .stat .value { font-family: var(--mono); font-size: 22px; font-weight: 700; margin-top: 4px; }
-
-  footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
-  footer a { color: var(--accent); text-decoration: none; }
-  footer a:hover { text-decoration: underline; }
-  .verify-banner { padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 16px; display: none; }
-  .verify-banner.err { display: block; background: rgba(248,81,73,0.12); border: 1px solid rgba(248,81,73,0.4); color: var(--bad); }
-  .note { font-size: 12px; color: var(--text-dim); margin-top: 12px; line-height: 1.5; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lotus codec laboratory</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080a0f;
+      --panel: #10141d;
+      --panel-2: #151b27;
+      --line: #283145;
+      --text: #eef3ff;
+      --muted: #95a1b8;
+      --lotus: #c8a6ff;
+      --lotus-2: #8e6de0;
+      --leb: #76d7c4;
+      --good: #76e6a5;
+      --bad: #ff8d8d;
+      --warn: #ffd27a;
+      --jump: #7048b5;
+      --tier: #a578e8;
+      --payload: #e3ceff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(121, 72, 181, .2), transparent 34rem),
+        radial-gradient(circle at 100% 12%, rgba(57, 147, 141, .13), transparent 32rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 80px; }
+    h1 { font-size: clamp(2.2rem, 6vw, 4.5rem); line-height: .98; letter-spacing: -.055em; margin: 0; }
+    h2 { margin: 0 0 12px; font-size: 1.06rem; letter-spacing: .01em; }
+    p { color: var(--muted); line-height: 1.62; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .eyebrow { color: var(--lotus); text-transform: uppercase; letter-spacing: .16em; font-size: .72rem; font-weight: 800; margin-bottom: 14px; }
+    .lead { max-width: 780px; font-size: 1.04rem; }
+    .hero { margin-bottom: 30px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line);
+      background: rgba(16,20,29,.82); border-radius: 999px; padding: 8px 12px; font-size: .78rem;
+      color: var(--muted); margin-top: 10px;
+    }
+    .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 14px currentColor; }
+    .badge.ok .dot { background: var(--good); }
+    .badge.err .dot { background: var(--bad); }
+    .grid { display: grid; gap: 16px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line); border-radius: 18px; padding: 20px;
+      background: linear-gradient(180deg, rgba(21,27,39,.96), rgba(13,17,25,.96));
+      box-shadow: 0 18px 60px rgba(0,0,0,.23);
+    }
+    label { display: block; color: var(--muted); font-size: .78rem; font-weight: 700; margin-bottom: 7px; }
+    input, select {
+      width: 100%; background: #0b0f17; border: 1px solid var(--line); color: var(--text);
+      border-radius: 10px; padding: 11px 12px; font: inherit;
+    }
+    input:focus, select:focus { outline: 2px solid rgba(200,166,255,.3); border-color: var(--lotus-2); }
+    .controls { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+    .controls .wide { grid-column: 1 / -1; }
+    .stat { padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7,10,15,.45); }
+    .stat .k { color: var(--muted); text-transform: uppercase; letter-spacing: .09em; font-size: .68rem; font-weight: 800; }
+    .stat .v { margin-top: 7px; font-size: clamp(1.25rem, 3vw, 2rem); font-weight: 800; letter-spacing: -.035em; }
+    .bars { display: grid; gap: 13px; margin-top: 18px; }
+    .bar-row { display: grid; grid-template-columns: 92px 1fr 70px; gap: 10px; align-items: center; font-size: .83rem; }
+    .track { height: 13px; background: #080b11; border: 1px solid #20283a; border-radius: 999px; overflow: hidden; }
+    .fill { height: 100%; border-radius: inherit; min-width: 2px; transition: width .18s ease; }
+    .fill.lotus { background: linear-gradient(90deg, var(--lotus-2), var(--lotus)); }
+    .fill.leb { background: linear-gradient(90deg, #348f83, var(--leb)); }
+    .layout { display: flex; flex-wrap: wrap; gap: 5px; min-height: 52px; align-items: center; }
+    .field { border-radius: 7px; padding: 8px 7px; color: #080a0f; font: 700 .75rem ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .field.jump { background: var(--jump); color: white; }
+    .field.tier { background: var(--tier); }
+    .field.payload { background: var(--payload); }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: .76rem; margin-top: 12px; }
+    .swatch { width: 10px; height: 10px; display: inline-block; border-radius: 3px; margin-right: 5px; }
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; }
+    tr.active { background: rgba(200,166,255,.07); }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .muted { color: var(--muted); }
+    .warning { border-color: rgba(255,141,141,.6); color: var(--bad); display: none; }
+    footer { color: var(--muted); font-size: .78rem; margin-top: 22px; }
+    a { color: var(--lotus); }
+    @media (max-width: 820px) {
+      .grid.two, .grid.three { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 74px 1fr 58px; }
+    }
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="badge-row">
-      <span class="badge" id="verify-badge"><span class="dot"></span>verifying…</span>
-      <span class="badge">Rust · experimental</span>
-      <span class="badge">bit-level</span>
-    </div>
-    <h1>Lotus 🪷</h1>
-    <p class="lede">A <b>density-reclaiming</b> integer codec that maps every fixed-width bitstring into a contiguous range, then restores self-delimiting behavior with a bounded tier chain. Tune <b>(J, d)</b>, hit start, and watch it trade blows with the varints as the value climbs.</p>
-  </header>
+<main>
+  <section class="hero">
+    <div class="eyebrow">one format · exact evidence · packed bits</div>
+    <h1>Lotus codec laboratory</h1>
+    <p class="lead">Every number on this page uses the canonical nonnegative payload mapping and positive width-descriptor mapping. The promoted configurations come from one Rust profile frontier; dominated variants are gone.</p>
+    <div id="verify" class="badge"><span class="dot"></span><span>checking Rust fixture…</span></div>
+  </section>
 
-  <div id="verify-banner" class="verify-banner err"></div>
+  <div id="warning" class="card warning"></div>
 
-  <div class="stack">
-
-    <!-- Counter + config -->
-    <div class="grid-2">
-      <div class="card">
-        <h2>configuration</h2>
-        <label class="field">
-          <span>Jumpstarter bits (J)</span>
-          <input type="number" id="j-input" min="1" max="8" value="2" />
-        </label>
-        <label class="field">
-          <span>Tiers (d)</span>
-          <input type="number" id="d-input" min="1" max="2" value="1" />
-        </label>
-        <div class="presets">
-          <button data-j="1" data-d="2">J1D2</button>
-          <button data-j="2" data-d="1" class="active">J2D1</button>
-          <button data-j="3" data-d="1">J3D1</button>
-          <button data-j="3" data-d="2">J3D2</button>
-        </div>
-        <div class="note">Larger J = wider immediate width state but higher per-value header cost. Larger d = bigger maximum range via recursive width description.</div>
-      </div>
-
-      <div class="card counter-block">
-        <h2>value counter · 20 / sec</h2>
-        <div class="counter" id="counter">0</div>
-        <div class="counter-meta" id="counter-meta">idle — press start</div>
-        <div class="btn-row">
-          <button class="btn primary" id="start-btn">▶ Start</button>
-          <button class="btn" id="pause-btn" disabled>❚❚ Pause</button>
-          <button class="btn" id="reset-btn">↺ Reset</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Chart -->
+  <section class="grid two" style="margin-top:16px">
     <div class="card">
-      <h2>size comparison — bits to encode the current value</h2>
-      <div class="chart-wrap">
-        <svg class="chart" id="chart" viewBox="0 0 760 360" role="img" aria-label="Bar chart comparing bits per value across codecs"></svg>
-      </div>
-      <div class="legend" id="legend"></div>
-      <div class="note">Bars recompute every tick (20×/sec). Watch the byte varints (LEB128, VLQ) jump in 8-bit steps at every ×128 boundary, while Lotus and the Elias codes climb smoothly — Lotus shifts tier only when its payload width crosses a power of two.</div>
-    </div>
-
-    <!-- Breakdown + stats -->
-    <div class="grid-2">
-      <div class="card">
-        <h2>lotus encoding layout</h2>
-        <div class="bits" id="bits"></div>
-        <div class="breakdown-legend">
-          <span><span class="swatch bg-jump" style="display:inline-block;vertical-align:middle;width:10px;height:10px;"></span> jumpstarter</span>
-          <span><span class="swatch bg-tier" style="display:inline-block;vertical-align:middle;width:10px;height:10px;"></span> tier chain</span>
-          <span><span class="swatch bg-payload" style="display:inline-block;vertical-align:middle;width:10px;height:10px;"></span> payload</span>
+      <h2>Inspect a value</h2>
+      <div class="controls">
+        <div class="wide">
+          <label for="value">Unsigned integer (0 … 2⁶⁴−1)</label>
+          <input id="value" class="mono" value="4294967295" inputmode="numeric" autocomplete="off">
         </div>
-        <div class="note" id="layout-note"></div>
+        <div>
+          <label for="profile">Recommended profile</label>
+          <select id="profile"></select>
+        </div>
+        <div>
+          <label for="custom">Profile purpose</label>
+          <input id="custom" readonly>
+        </div>
       </div>
-      <div class="card">
-        <h2>at this value</h2>
-        <div class="stat-grid" id="stats"></div>
-        <div class="note" id="verdict"></div>
-      </div>
+      <div id="range-note" class="muted" style="margin-top:12px;font-size:.8rem"></div>
     </div>
 
-  </div>
+    <div class="grid three">
+      <div class="stat"><div class="k">Lotus</div><div id="lotus-bits" class="v">—</div></div>
+      <div class="stat"><div class="k">LEB128</div><div id="leb-bits" class="v">—</div></div>
+      <div class="stat"><div class="k">Difference</div><div id="difference" class="v">—</div></div>
+    </div>
+  </section>
+
+  <section class="grid two" style="margin-top:16px">
+    <div class="card">
+      <h2>Meaningful-bit comparison</h2>
+      <div id="bars" class="bars"></div>
+      <p style="font-size:.78rem;margin-bottom:0">Lotus is measured as a packed bitstream. Per-value byte padding is deliberately not counted.</p>
+    </div>
+    <div class="card">
+      <h2>Canonical codeword layout</h2>
+      <div id="layout" class="layout"></div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--jump)"></i>jumpstarter</span>
+        <span><i class="swatch" style="background:var(--tier)"></i>positive width descriptor</span>
+        <span><i class="swatch" style="background:var(--payload)"></i>nonnegative payload</span>
+      </div>
+      <p id="layout-note" style="font-size:.78rem;margin-bottom:0"></p>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Recommended configuration frontier</h2>
+    <table>
+      <thead><tr><th>Profile</th><th>J</th><th>d</th><th>Maximum value</th><th>Bits here</th><th>vs LEB</th></tr></thead>
+      <tbody id="profile-table"></tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Exact complete-u32 evidence</h2>
+    <p style="margin-top:0">These counts aggregate every one of the 4,294,967,296 unsigned 32-bit values. They are generated by Rust, not estimated in the browser.</p>
+    <table>
+      <thead><tr><th>Profile</th><th>Average bits</th><th>Wins</th><th>Ties</th><th>Losses</th><th>Strict win rate</th></tr></thead>
+      <tbody id="u32-table"></tbody>
+    </table>
+  </section>
 
   <footer>
-    Size figures are computed live by a JavaScript port of the codec in <code>src/lib.rs</code> and <code>src/metrics.rs</code>, then checked against a Rust-generated reference fixture on every page load (see badge above). Runtime throughput is not shown here — reproduce it locally with <code>cargo bench --bench comparison</code>. Lotus is experimental research software. Read the <a href="./WHITEPAPER.md">whitepaper</a>, <a href="./THEORY.md">theory</a>, and <a href="./RESULTS.md">generated results</a>.
+    Regenerate <code>docs/RESULTS.md</code>, <code>docs/results.json</code>, and this page's fixture with <code>scripts/reproduce_paper.sh</code>. Read the <a href="./FORMAT.md">normative format</a> and <a href="./BENCHMARKS.md">benchmark methodology</a>.
   </footer>
-</div>
+</main>
 
+<script src="./demo-fixture.js"></script>
 <script>
-"use strict";
+(() => {
+  "use strict";
+  const REF = window.LOTUS_REFERENCE;
+  const purposes = {
+    J1D1: "minimum overhead through 125",
+    J2D1: "one-tier density through 2³¹−3",
+    J1D2: "minimum bits across full u64",
+    J3D1: "one-tier full-u64 fast path"
+  };
+  const U64_MAX = (1n << 64n) - 1n;
 
-// ---------------------------------------------------------------------------
-// Reference fixture: generated by `cargo run --example generate_demo_fixture`.
-// The page recomputes Lotus bit lengths for these same (value, j, d) triples
-// in JS and asserts equality on load — drift is caught immediately.
-// ---------------------------------------------------------------------------
-const LOTUS_REFERENCE = [{"v":0,"j":1,"d":2,"bits":4},{"v":0,"j":2,"d":1,"bits":4},{"v":0,"j":3,"d":1,"bits":5},{"v":0,"j":3,"d":2,"bits":6},{"v":1,"j":1,"d":2,"bits":7},{"v":1,"j":2,"d":1,"bits":6},{"v":1,"j":3,"d":1,"bits":7},{"v":1,"j":3,"d":2,"bits":9},{"v":2,"j":1,"d":2,"bits":7},{"v":2,"j":2,"d":1,"bits":6},{"v":2,"j":3,"d":1,"bits":7},{"v":2,"j":3,"d":2,"bits":9},{"v":3,"j":1,"d":2,"bits":7},{"v":3,"j":2,"d":1,"bits":6},{"v":3,"j":3,"d":1,"bits":7},{"v":3,"j":3,"d":2,"bits":9},{"v":5,"j":1,"d":2,"bits":8},{"v":5,"j":2,"d":1,"bits":7},{"v":5,"j":3,"d":1,"bits":8},{"v":5,"j":3,"d":2,"bits":10},{"v":13,"j":1,"d":2,"bits":9},{"v":13,"j":2,"d":1,"bits":8},{"v":13,"j":3,"d":1,"bits":9},{"v":13,"j":3,"d":2,"bits":11},{"v":14,"j":1,"d":2,"bits":9},{"v":14,"j":2,"d":1,"bits":8},{"v":14,"j":3,"d":1,"bits":9},{"v":14,"j":3,"d":2,"bits":11},{"v":29,"j":1,"d":2,"bits":10},{"v":29,"j":2,"d":1,"bits":9},{"v":29,"j":3,"d":1,"bits":10},{"v":29,"j":3,"d":2,"bits":12},{"v":30,"j":1,"d":2,"bits":10},{"v":30,"j":2,"d":1,"bits":9},{"v":30,"j":3,"d":1,"bits":10},{"v":30,"j":3,"d":2,"bits":12},{"v":61,"j":1,"d":2,"bits":12},{"v":61,"j":2,"d":1,"bits":11},{"v":61,"j":3,"d":1,"bits":12},{"v":61,"j":3,"d":2,"bits":14},{"v":62,"j":1,"d":2,"bits":12},{"v":62,"j":2,"d":1,"bits":11},{"v":62,"j":3,"d":1,"bits":12},{"v":62,"j":3,"d":2,"bits":14},{"v":125,"j":1,"d":2,"bits":13},{"v":125,"j":2,"d":1,"bits":12},{"v":125,"j":3,"d":1,"bits":13},{"v":125,"j":3,"d":2,"bits":15},{"v":126,"j":1,"d":2,"bits":13},{"v":126,"j":2,"d":1,"bits":12},{"v":126,"j":3,"d":1,"bits":13},{"v":126,"j":3,"d":2,"bits":15},{"v":253,"j":1,"d":2,"bits":14},{"v":253,"j":2,"d":1,"bits":13},{"v":253,"j":3,"d":1,"bits":14},{"v":253,"j":3,"d":2,"bits":16},{"v":254,"j":1,"d":2,"bits":14},{"v":254,"j":2,"d":1,"bits":13},{"v":254,"j":3,"d":1,"bits":14},{"v":254,"j":3,"d":2,"bits":16},{"v":509,"j":1,"d":2,"bits":15},{"v":509,"j":2,"d":1,"bits":14},{"v":509,"j":3,"d":1,"bits":15},{"v":509,"j":3,"d":2,"bits":17},{"v":510,"j":1,"d":2,"bits":15},{"v":510,"j":2,"d":1,"bits":14},{"v":510,"j":3,"d":1,"bits":15},{"v":510,"j":3,"d":2,"bits":17},{"v":1021,"j":1,"d":2,"bits":16},{"v":1021,"j":2,"d":1,"bits":15},{"v":1021,"j":3,"d":1,"bits":16},{"v":1021,"j":3,"d":2,"bits":18},{"v":1022,"j":1,"d":2,"bits":16},{"v":1022,"j":2,"d":1,"bits":15},{"v":1022,"j":3,"d":1,"bits":16},{"v":1022,"j":3,"d":2,"bits":18},{"v":2045,"j":1,"d":2,"bits":17},{"v":2045,"j":2,"d":1,"bits":16},{"v":2045,"j":3,"d":1,"bits":17},{"v":2045,"j":3,"d":2,"bits":19},{"v":2046,"j":1,"d":2,"bits":17},{"v":2046,"j":2,"d":1,"bits":16},{"v":2046,"j":3,"d":1,"bits":17},{"v":2046,"j":3,"d":2,"bits":19},{"v":4093,"j":1,"d":2,"bits":18},{"v":4093,"j":2,"d":1,"bits":17},{"v":4093,"j":3,"d":1,"bits":18},{"v":4093,"j":3,"d":2,"bits":20},{"v":4094,"j":1,"d":2,"bits":18},{"v":4094,"j":2,"d":1,"bits":17},{"v":4094,"j":3,"d":1,"bits":18},{"v":4094,"j":3,"d":2,"bits":20},{"v":8189,"j":1,"d":2,"bits":19},{"v":8189,"j":2,"d":1,"bits":18},{"v":8189,"j":3,"d":1,"bits":19},{"v":8189,"j":3,"d":2,"bits":21},{"v":8190,"j":1,"d":2,"bits":19},{"v":8190,"j":2,"d":1,"bits":18},{"v":8190,"j":3,"d":1,"bits":19},{"v":8190,"j":3,"d":2,"bits":21},{"v":16381,"j":1,"d":2,"bits":21},{"v":16381,"j":2,"d":1,"bits":20},{"v":16381,"j":3,"d":1,"bits":21},{"v":16381,"j":3,"d":2,"bits":23},{"v":16382,"j":1,"d":2,"bits":21},{"v":16382,"j":2,"d":1,"bits":20},{"v":16382,"j":3,"d":1,"bits":21},{"v":16382,"j":3,"d":2,"bits":23},{"v":65533,"j":1,"d":2,"bits":23},{"v":65533,"j":2,"d":1,"bits":22},{"v":65533,"j":3,"d":1,"bits":23},{"v":65533,"j":3,"d":2,"bits":25},{"v":65534,"j":1,"d":2,"bits":23},{"v":65534,"j":2,"d":1,"bits":22},{"v":65534,"j":3,"d":1,"bits":23},{"v":65534,"j":3,"d":2,"bits":25},{"v":1000000,"j":1,"d":2,"bits":26},{"v":1000000,"j":2,"d":1,"bits":25},{"v":1000000,"j":3,"d":1,"bits":26},{"v":1000000,"j":3,"d":2,"bits":28},{"v":1048573,"j":1,"d":2,"bits":27},{"v":1048573,"j":2,"d":1,"bits":26},{"v":1048573,"j":3,"d":1,"bits":27},{"v":1048573,"j":3,"d":2,"bits":29},{"v":1048574,"j":1,"d":2,"bits":27},{"v":1048574,"j":2,"d":1,"bits":26},{"v":1048574,"j":3,"d":1,"bits":27},{"v":1048574,"j":3,"d":2,"bits":29},{"v":16777213,"j":1,"d":2,"bits":31},{"v":16777213,"j":2,"d":1,"bits":30},{"v":16777213,"j":3,"d":1,"bits":31},{"v":16777213,"j":3,"d":2,"bits":33},{"v":16777214,"j":1,"d":2,"bits":31},{"v":16777214,"j":2,"d":1,"bits":30},{"v":16777214,"j":3,"d":1,"bits":31},{"v":16777214,"j":3,"d":2,"bits":33},{"v":4294967293,"j":1,"d":2,"bits":null},{"v":4294967293,"j":2,"d":1,"bits":null},{"v":4294967293,"j":3,"d":1,"bits":40},{"v":4294967293,"j":3,"d":2,"bits":42},{"v":4294967294,"j":1,"d":2,"bits":null},{"v":4294967294,"j":2,"d":1,"bits":null},{"v":4294967294,"j":3,"d":1,"bits":40},{"v":4294967294,"j":3,"d":2,"bits":42},{"v":281474976710656,"j":1,"d":2,"bits":null},{"v":281474976710656,"j":2,"d":1,"bits":null},{"v":281474976710656,"j":3,"d":1,"bits":56},{"v":281474976710656,"j":3,"d":2,"bits":58}];
-
-// ---------------------------------------------------------------------------
-// Codec math — faithful JS port of src/lib.rs (lotus) + src/metrics.rs.
-// BigInt is used throughout so the full u64 domain is exact.
-// ---------------------------------------------------------------------------
-
-// floor(log2(n)) for BigInt n >= 1.
-function floorLog2(n) {
-  let bits = 0n;
-  let x = n;
-  while (x > 1n) { x >>= 1n; bits += 1n; }
-  return bits;
-}
-
-// lotus_width_for_value(value): width w with 2^w - 2 <= value <= 2^(w+1) - 3.
-// Closed form w = floor(log2(value + 2)). Matches the O(1) form in src/lib.rs.
-function lotusWidth(value) {
-  const shifted = value + 2n;
-  return floorLog2(shifted); // >= 1 since value >= 0 => shifted >= 2
-}
-
-// Maximum representable width for (J, d). Mirrors max_width_for_config.
-function maxWidthForConfig(j, d) {
-  let max = 1n << BigInt(j);
-  for (let i = 0; i < d; i++) {
-    const shift = max + 1n;
-    if (shift >= 128n) return 127n;
-    max = (1n << shift) - 4n;
+  function floorLog2(value) {
+    let width = -1;
+    for (let x = value; x > 0n; x >>= 1n) width += 1;
+    return width;
   }
-  return max;
-}
-
-// {bits: total, layout: [jumpstarter|tiers|payload] bit runs}.
-// Returns null if value is out of range for (j, d).
-function lotusEncode(value, j, d) {
-  const V = BigInt(value);
-  if (j < 1 || j > 8 || d < 1) return null;
-  const payloadValue = V + 1n;
-  let payloadWidth = lotusWidth(payloadValue);
-  const maxWidth = maxWidthForConfig(j, d);
-  if (payloadWidth > maxWidth) return null;
-
-  // Build the tier chain: each tier encodes the current width, then narrows.
-  const chain = []; // {value, width}
-  let currentWidth = payloadWidth;
-  for (let i = 0; i < d; i++) {
-    const tierWidth = lotusWidth(currentWidth);
-    chain.push({ value: currentWidth, width: tierWidth });
-    currentWidth = tierWidth;
+  function nonnegativeWidth(value) { return floorLog2(value + 2n); }
+  function positiveWidth(value) {
+    if (value < 1n) throw new Error("positive width required");
+    return floorLog2(value + 1n);
   }
-  if (currentWidth === 0n || currentWidth > (1n << BigInt(j))) return null;
+  function bits(value, width) { return value.toString(2).padStart(Number(width), "0"); }
 
-  const jumpVal = currentWidth - 1n; // value stored in the jumpstarter field
-  // Payload value re-derived exactly as in lotus_encode_fixed_biguint:
-  // payload = (value + 1) - (2^payloadWidth - 2)
-  const payloadStart = (1n << payloadWidth) - 2n;
-  const payload = payloadValue - payloadStart;
+  function lotusLayout(value, j, d) {
+    const widths = [BigInt(nonnegativeWidth(value))];
+    for (let i = 0; i < d; i++) widths.push(BigInt(positiveWidth(widths[widths.length - 1])));
+    if (widths[widths.length - 1] > (1n << BigInt(j))) return null;
 
-  const layout = [];
-  // Jumpstarter (j bits).
-  layout.push({ cls: "bg-jump", bits: jumpVal.toString(2).padStart(Number(j), "0"), label: "J" });
-  // Tier chain, written outer-to-inner (reverse of build order).
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const t = chain[i];
-    const tierStart = (1n << t.width) - 2n;
-    const tierPayload = t.value - tierStart;
-    layout.push({ cls: "bg-tier", bits: tierPayload.toString(2).padStart(Number(t.width), "0"), label: "T" });
+    const fields = [];
+    const outer = widths[widths.length - 1];
+    fields.push({ kind: "jump", label: "J", width: BigInt(j), value: outer - 1n });
+    for (let level = widths.length - 1; level >= 1; level--) {
+      const fieldWidth = widths[level];
+      const described = widths[level - 1];
+      const start = (1n << fieldWidth) - 1n;
+      fields.push({ kind: "tier", label: `T${widths.length - level}`, width: fieldWidth, value: described - start });
+    }
+    const payloadWidth = widths[0];
+    const payloadStart = (1n << payloadWidth) - 2n;
+    fields.push({ kind: "payload", label: "P", width: payloadWidth, value: value - payloadStart });
+
+    return { total: Number(BigInt(j) + widths.reduce((a, b) => a + b, 0n)), widths, fields };
   }
-  // Payload.
-  layout.push({ cls: "bg-payload", bits: payload.toString(2).padStart(Number(payloadWidth), "0"), label: "P" });
+  function leb128Bits(value) {
+    const width = value === 0n ? 1 : floorLog2(value) + 1;
+    return Math.max(1, Math.ceil(width / 7)) * 8;
+  }
+  function gammaBits(value) { return 2 * floorLog2(value + 1n) + 1; }
+  function deltaBits(value) {
+    const n = floorLog2(value + 1n);
+    return 2 * floorLog2(BigInt(n + 1)) + 1 + n;
+  }
+  function profileByLabel(label) { return REF.profiles.find(p => p.label === label); }
 
-  const total = layout.reduce((s, f) => s + f.bits.length, 0);
-  return { bits: total, layout, payloadWidth: Number(payloadWidth), chain: chain.map(c => Number(c.width)) };
-}
+  function validateFixture() {
+    if (!REF || REF.format !== 1) return { ok: false, failures: 1, cases: 0 };
+    let failures = 0;
+    let cases = 0;
+    for (let valueIndex = 0; valueIndex < REF.values.length; valueIndex++) {
+      const value = BigInt(REF.values[valueIndex]);
+      for (let profileIndex = 0; profileIndex < REF.profiles.length; profileIndex++) {
+        const profile = REF.profiles[profileIndex];
+        const got = lotusLayout(value, profile.j, profile.d);
+        const gotBits = got ? got.total : null;
+        if (gotBits !== REF.bits[valueIndex][profileIndex]) failures += 1;
+        cases += 1;
+      }
+    }
+    return { ok: failures === 0, failures, cases };
+  }
 
-function leb128Bits(value) {
-  const V = BigInt(value);
-  const n = V === 0n ? 1 : Number(floorLog2(V)) + 1; // bit length
-  const bytes = Math.max(1, Math.ceil(n / 7));
-  return bytes * 8;
-}
-function vlqBits(value) { return leb128Bits(value); }
+  const verification = validateFixture();
+  const verify = document.getElementById("verify");
+  verify.classList.add(verification.ok ? "ok" : "err");
+  verify.querySelector("span:last-child").textContent = verification.ok
+    ? `verified against ${verification.cases} Rust cases`
+    : `${verification.failures} JavaScript/Rust mismatches`;
+  if (!verification.ok) {
+    const warning = document.getElementById("warning");
+    warning.style.display = "block";
+    warning.textContent = "The demo has drifted from the Rust codec. Results below are disabled until docs/demo-fixture.js is regenerated.";
+  }
 
-function eliasGammaBits(value) {
-  // x = value + 1 ; length = 2*floor(log2(x)) + 1
-  const x = BigInt(value) + 1n;
-  const n = Number(floorLog2(x)); // >= 0
-  return 2 * n + 1;
-}
+  const profileSelect = document.getElementById("profile");
+  for (const profile of REF.profiles) {
+    const option = document.createElement("option");
+    option.value = profile.label;
+    option.textContent = profile.label;
+    if (profile.label === "J1D2") option.selected = true;
+    profileSelect.appendChild(option);
+  }
 
-function eliasDeltaBits(value) {
-  // x = value + 1 ; N = floor(log2(x)) ; length = gamma_len(N+1) + N
-  const x = BigInt(value) + 1n;
-  const N = floorLog2(x);
-  const np1 = N + 1n;
-  const lBits = Number(floorLog2(np1)) + 1; // bit length of N+1
-  const L = lBits - 1; // leading zero count
-  return (2 * L + 1) + Number(N);
-}
+  function fmt(value) { return BigInt(value).toLocaleString("en-US"); }
+  function pct(count, total) { return (Number(BigInt(count) * 100000000n / BigInt(total)) / 1000000).toFixed(6); }
 
-// ---------------------------------------------------------------------------
-// Self-verification against the Rust-generated fixture.
-// ---------------------------------------------------------------------------
-function runVerification() {
-  let failures = 0;
-  for (const ref of LOTUS_REFERENCE) {
-    const got = lotusEncode(BigInt(ref.v), ref.j, ref.d);
-    const gotBits = got ? got.bits : null;
-    if (gotBits !== ref.bits) {
-      failures++;
-      console.error(`MISMATCH v=${ref.v} j=${ref.j} d=${ref.d}: js=${gotBits} rust=${ref.bits}`);
+  function renderU32() {
+    const tbody = document.getElementById("u32-table");
+    tbody.innerHTML = "";
+    const total = BigInt(REF.uniformU32Values);
+    for (const row of REF.uniformU32) {
+      if (row.totalBits === null) continue;
+      const tr = document.createElement("tr");
+      const avg = (Number(BigInt(row.totalBits) * 1000000n / total) / 1000000).toFixed(6);
+      tr.innerHTML = `<td>${row.label}</td><td>${avg}</td><td>${fmt(row.wins)}</td><td>${fmt(row.ties)}</td><td>${fmt(row.losses)}</td><td class="good">${pct(row.wins, total)}%</td>`;
+      tbody.appendChild(tr);
     }
   }
-  const badge = document.getElementById("verify-badge");
-  const banner = document.getElementById("verify-banner");
-  if (failures === 0) {
-    badge.className = "badge ok";
-    badge.innerHTML = '<span class="dot"></span>verified vs Rust reference';
-    return true;
-  } else {
-    badge.className = "badge err";
-    badge.innerHTML = `<span class="dot"></span>${failures} mismatch(es)`;
-    banner.className = "verify-banner err";
-    banner.textContent = `Self-check failed: ${failures} Lotus bit-length computation(s) do not match the Rust-generated reference fixture. The demo numbers below are NOT trustworthy until this is resolved.`;
-    return false;
-  }
-}
 
-// ---------------------------------------------------------------------------
-// UI state
-// ---------------------------------------------------------------------------
-const CODECS = [
-  { key: "lotusSel",  label: (s) => `Lotus ${s}`,   color: "var(--lotus)", isLotus: true },
-  { key: "j1d2",      label: () => "Lotus J1D2",     color: "#c4a7ff",      isLotus: true, cfg: [1,2] },
-  { key: "j2d1",      label: () => "Lotus J2D1",     color: "#b288ff",      isLotus: true, cfg: [2,1] },
-  { key: "j3d1",      label: () => "Lotus J3D1",     color: "#9f7aea",      isLotus: true, cfg: [3,1] },
-  { key: "j3d2",      label: () => "Lotus J3D2",     color: "#7c5fd6",      isLotus: true, cfg: [3,2] },
-  { key: "leb",       label: () => "LEB128",         color: "var(--leb)" },
-  { key: "vlq",       label: () => "VLQ",            color: "var(--vlq)" },
-  { key: "gamma",     label: () => "Elias γ",        color: "var(--gamma)" },
-  { key: "delta",     label: () => "Elias δ",        color: "var(--delta)" },
-];
+  function render() {
+    if (!verification.ok) return;
+    const raw = document.getElementById("value").value.trim();
+    let value;
+    try { value = BigInt(raw || "0"); } catch { value = -1n; }
+    const warning = document.getElementById("warning");
+    if (value < 0n || value > U64_MAX) {
+      warning.style.display = "block";
+      warning.textContent = "Enter a decimal integer between 0 and 18,446,744,073,709,551,615.";
+      return;
+    }
+    warning.style.display = "none";
 
-let state = { value: 0n, j: 2, d: 1, running: false, timer: null, ticks: 0 };
+    const selected = profileByLabel(profileSelect.value);
+    const layout = lotusLayout(value, selected.j, selected.d);
+    const leb = leb128Bits(value);
+    const lotus = layout ? layout.total : null;
+    document.getElementById("custom").value = purposes[selected.label];
+    document.getElementById("range-note").textContent = `Maximum value for ${selected.label}: ${fmt(selected.max)}`;
+    document.getElementById("lotus-bits").textContent = lotus === null ? "out of range" : `${lotus} bits`;
+    document.getElementById("leb-bits").textContent = `${leb} bits`;
+    const difference = lotus === null ? null : leb - lotus;
+    const diffNode = document.getElementById("difference");
+    diffNode.textContent = difference === null ? "—" : difference > 0 ? `${difference} fewer` : difference < 0 ? `${-difference} more` : "tie";
+    diffNode.className = `v ${difference > 0 ? "good" : difference < 0 ? "bad" : ""}`;
 
-function currentLotusBits() {
-  const e = lotusEncode(state.value, state.j, state.d);
-  return e ? e.bits : null;
-}
+    const codecs = [
+      [selected.label, lotus, "lotus"],
+      ["LEB128", leb, "leb"],
+      ["Elias γ", gammaBits(value), "leb"],
+      ["Elias δ", deltaBits(value), "leb"]
+    ].filter(x => x[1] !== null);
+    const max = Math.max(...codecs.map(x => x[1]));
+    const bars = document.getElementById("bars");
+    bars.innerHTML = codecs.map(([name, count, cls]) => `
+      <div class="bar-row"><span>${name}</span><div class="track"><div class="fill ${cls}" style="width:${100 * count / max}%"></div></div><strong>${count}</strong></div>
+    `).join("");
 
-function allCodecBits() {
-  const v = state.value;
-  const sel = currentLotusBits();
-  const out = {};
-  for (const c of CODECS) {
-    if (c.key === "lotusSel") out[c.key] = sel;
-    else if (c.isLotus) {
-      const e = lotusEncode(v, c.cfg[0], c.cfg[1]);
-      out[c.key] = e ? e.bits : null;
-    } else if (c.key === "leb") out[c.key] = leb128Bits(v);
-    else if (c.key === "vlq") out[c.key] = vlqBits(v);
-    else if (c.key === "gamma") out[c.key] = eliasGammaBits(v);
-    else if (c.key === "delta") out[c.key] = eliasDeltaBits(v);
-  }
-  return out;
-}
+    const layoutNode = document.getElementById("layout");
+    if (!layout) {
+      layoutNode.innerHTML = '<span class="bad">Value is outside this profile.</span>';
+      document.getElementById("layout-note").textContent = "Choose a wider recommended profile.";
+    } else {
+      layoutNode.innerHTML = layout.fields.map(field => `<span class="field ${field.kind}" style="flex:${Number(field.width)} 1 38px" title="${field.width} bits">${field.label}: ${bits(field.value, field.width)}</span>`).join("");
+      document.getElementById("layout-note").textContent = `${layout.total} meaningful bits. Width chain: ${layout.widths.map(String).join(" → ")}.`;
+    }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-function fmt(n) { return Number(n).toLocaleString("en-US"); }
-
-function renderChart() {
-  const bits = allCodecBits();
-  const svg = document.getElementById("chart");
-  const W = 760, H = 360;
-  const padL = 52, padR = 16, padT = 28, padB = 44;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-
-  const entries = CODECS.map(c => ({ ...c, val: bits[c.key] })).filter(e => e.val !== null);
-  const maxVal = Math.max(8, ...entries.map(e => e.val));
-  const barW = entries.length > 0 ? (plotW / entries.length) * 0.62 : 0;
-  const slot = entries.length > 0 ? plotW / entries.length : plotW;
-
-  // Nice rounded max for the y-axis.
-  const yMax = Math.ceil(maxVal / 4) * 4;
-
-  let parts = [];
-
-  // y-axis gridlines + labels
-  const ySteps = 4;
-  for (let i = 0; i <= ySteps; i++) {
-    const y = padT + plotH - (i / ySteps) * plotH;
-    const val = Math.round((i / ySteps) * yMax);
-    parts.push(`<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#21262d" stroke-width="1"/>`);
-    parts.push(`<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="11" font-family="var(--mono)" fill="#8b949e">${val}</text>`);
-  }
-  parts.push(`<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#30363d" stroke-width="1"/>`);
-  parts.push(`<text x="${padL - 40}" y="${padT + plotH/2}" text-anchor="middle" font-size="11" fill="#8b949e" transform="rotate(-90 ${padL-40} ${padT+plotH/2})">bits</text>`);
-
-  // bars
-  entries.forEach((e, i) => {
-    const cx = padL + slot * i + slot / 2;
-    const bh = (e.val / yMax) * plotH;
-    const x = cx - barW / 2;
-    const y = padT + plotH - bh;
-    const isSel = e.key === "lotusSel";
-    const opacity = isSel ? 1 : 0.5;
-    const stroke = isSel ? `stroke="#fff" stroke-opacity="0.5" stroke-width="1.5"` : "";
-    parts.push(`<rect x="${x}" y="${y}" width="${barW}" height="${bh}" rx="4" fill="${e.color}" fill-opacity="${opacity}" ${stroke}/>`);
-    // value label on top
-    parts.push(`<text x="${cx}" y="${y - 8}" text-anchor="middle" font-size="13" font-family="var(--mono)" font-weight="700" fill="${isSel ? '#e6edf3' : '#8b949e'}">${e.val}</text>`);
-    // x-axis label
-    const lbl = e.isLotus && e.key !== "lotusSel" ? e.label() : e.label(state.j + "D" + state.d);
-    parts.push(`<text x="${cx}" y="${padT + plotH + 20}" text-anchor="middle" font-size="11" fill="${isSel ? '#e6edf3' : '#8b949e'}" font-weight="${isSel?600:400}">${lbl}</text>`);
-  });
-
-  svg.innerHTML = parts.join("");
-
-  // legend
-  const legend = document.getElementById("legend");
-  legend.innerHTML = entries.map(e => {
-    const sel = e.key === "lotusSel" ? "active" : "";
-    const lbl = e.isLotus && e.key !== "lotusSel" ? e.label() : e.label(state.j + "D" + state.d);
-    return `<span class="legend-item ${sel}"><span class="swatch" style="background:${e.color};opacity:${e.key==='lotusSel'?1:0.6}"></span>${lbl}</span>`;
-  }).join("");
-}
-
-function renderBreakdown() {
-  const box = document.getElementById("bits");
-  const note = document.getElementById("layout-note");
-  const e = lotusEncode(state.value, state.j, state.d);
-  if (!e) {
-    box.innerHTML = '<span style="color:var(--bad);font-family:var(--mono);font-size:14px;">value out of range for this (J, d)</span>';
-    note.textContent = "";
-    return;
-  }
-  box.innerHTML = e.layout.map(f => `<span class="bit-group ${f.cls}" title="${f.label}">${f.bits}</span>`).join("");
-  const tierDesc = e.chain.length ? `tier widths ${e.chain.join(" → ")}` : "no tiers";
-  note.textContent = `${e.bits} bits total: jumpstarter ${state.j} + tier chain ${e.chain.reduce((a,b)=>a+b,0)} + payload ${e.payloadWidth} (${tierDesc}).`;
-}
-
-function renderStats() {
-  const bits = allCodecBits();
-  const sel = bits.lotusSel;
-  const box = document.getElementById("stats");
-  const verdict = document.getElementById("verdict");
-
-  if (sel === null) {
-    box.innerHTML = `<div class="stat"><div class="label">status</div><div class="value" style="color:var(--bad)">out of range</div></div>`;
-    verdict.textContent = "This value exceeds the representable range for the selected (J, d). Raise J, add a tier, or pick a wider preset.";
-    return;
+    const table = document.getElementById("profile-table");
+    table.innerHTML = "";
+    for (const profile of REF.profiles) {
+      const candidate = lotusLayout(value, profile.j, profile.d);
+      const candidateBits = candidate ? candidate.total : null;
+      const delta = candidateBits === null ? null : leb - candidateBits;
+      const tr = document.createElement("tr");
+      if (profile.label === selected.label) tr.className = "active";
+      tr.innerHTML = `<td>${profile.label}<div class="muted" style="font-size:.7rem">${purposes[profile.label]}</div></td><td>${profile.j}</td><td>${profile.d}</td><td>${fmt(profile.max)}</td><td>${candidateBits ?? "NA"}</td><td class="${delta > 0 ? "good" : delta < 0 ? "bad" : ""}">${delta === null ? "NA" : delta > 0 ? `−${delta}` : delta < 0 ? `+${-delta}` : "tie"}</td>`;
+      table.appendChild(tr);
+    }
   }
 
-  // Comparisons vs Lotus.
-  const leb = bits.leb, vlq = bits.vlq, gamma = bits.gamma, delta = bits.delta;
-  const savingVs = (other) => other === null ? null : other - sel;
-  const pct = (d) => d === null ? "—" : (d >= 0 ? `−${d} bit${d===1?"":"s"}` : `+${-d}`);
-
-  const stats = [
-    { label: "lotus bits", value: sel, color: "var(--lotus)" },
-    { label: "vs LEB128", value: pct(savingVs(leb)) },
-    { label: "vs VLQ", value: pct(savingVs(vlq)) },
-    { label: "vs Elias γ", value: pct(savingVs(gamma)) },
-    { label: "vs Elias δ", value: pct(savingVs(delta)) },
-  ];
-  box.innerHTML = stats.map(s => `<div class="stat"><div class="label">${s.label}</div><div class="value" style="${s.color?`color:${s.color}`:""}">${s.value}</div></div>`).join("");
-
-  // Verdict: smallest codec wins.
-  const ranked = CODECS.filter(c => bits[c.key] !== null)
-    .map(c => ({ name: c.isLotus && c.key !== "lotusSel" ? c.label() : (c.key==="lotusSel" ? `Lotus ${state.j}D${state.d}` : c.label()), val: bits[c.key] }))
-    .sort((a,b) => a.val - b.val);
-  const winner = ranked[0];
-  const lotusSelName = `Lotus ${state.j}D${state.d}`;
-  const lotusRank = ranked.findIndex(r => r.name === lotusSelName) + 1;
-  if (winner.name === lotusSelName) {
-    verdict.innerHTML = `<span style="color:var(--good)">Lotus is the most compact</span> at this value (${winner.val} bits, beating the next by ${ranked[1].val - winner.val}).`;
-  } else {
-    verdict.innerHTML = `Lotus ranks <b>#${lotusRank}/${ranked.length}</b> on size here. ${winner.name} wins at ${winner.val} bits (Lotus uses ${sel}).`;
-  }
-}
-
-function render() {
-  document.getElementById("counter").textContent = fmt(state.value);
-  document.getElementById("counter-meta").textContent = state.running
-    ? `running · ${state.ticks} ticks · ${fmt(state.value)}`
-    : (state.value === 0n ? "idle — press start" : `paused at ${fmt(state.value)}`);
-  renderChart();
-  renderBreakdown();
-  renderStats();
-}
-
-// ---------------------------------------------------------------------------
-// Controls
-// ---------------------------------------------------------------------------
-function setConfig(j, d, fromPreset) {
-  state.j = j; state.d = d;
-  document.getElementById("j-input").value = j;
-  document.getElementById("d-input").value = d;
-  document.querySelectorAll(".presets button").forEach(b => {
-    b.classList.toggle("active", fromPreset && Number(b.dataset.j) === j && Number(b.dataset.d) === d);
-  });
+  document.getElementById("value").addEventListener("input", render);
+  profileSelect.addEventListener("change", render);
+  renderU32();
   render();
-}
-
-function start() {
-  if (state.running) return;
-  state.running = true;
-  document.getElementById("start-btn").disabled = true;
-  document.getElementById("pause-btn").disabled = false;
-  // Strict 20 ticks/sec: +1 per tick, indefinitely.
-  state.timer = setInterval(() => {
-    state.value += 1n;
-    state.ticks += 1;
-    render();
-  }, 50);
-  render();
-}
-function pause() {
-  if (!state.running) return;
-  state.running = false;
-  clearInterval(state.timer);
-  state.timer = null;
-  document.getElementById("start-btn").disabled = false;
-  document.getElementById("pause-btn").disabled = true;
-  render();
-}
-function reset() {
-  pause();
-  state.value = 0n;
-  state.ticks = 0;
-  render();
-}
-
-document.getElementById("start-btn").addEventListener("click", start);
-document.getElementById("pause-btn").addEventListener("click", pause);
-document.getElementById("reset-btn").addEventListener("click", reset);
-document.getElementById("j-input").addEventListener("input", (e) => {
-  const j = Math.max(1, Math.min(8, Number(e.target.value) || 1));
-  setConfig(j, state.d, false);
-});
-document.getElementById("d-input").addEventListener("input", (e) => {
-  const d = Math.max(1, Math.min(2, Number(e.target.value) || 1));
-  setConfig(state.j, d, false);
-});
-document.querySelectorAll(".presets button").forEach(b => {
-  b.addEventListener("click", () => setConfig(Number(b.dataset.j), Number(b.dataset.d), true));
-});
-
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
-runVerification();
-setConfig(2, 1, true);
-render();
+})();
 </script>
 </body>
 </html>

@@ -1,15 +1,24 @@
-use lotus::{LOTUS_J1D2, LOTUS_J2D1, LOTUS_J3D1, lotus_decode_u64, lotus_encode_u64};
+use lotus::{RECOMMENDED_PROFILES, lotus_encoded_bit_len};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let value = 1_000_000u64;
-    for (name, cfg) in [
-        ("J1D2", LOTUS_J1D2),
-        ("J2D1", LOTUS_J2D1),
-        ("J3D1", LOTUS_J3D1),
-    ] {
-        let encoded = lotus_encode_u64(value, cfg.0, cfg.1)?;
-        let (_, bits) = lotus_decode_u64(&encoded, cfg.0, cfg.1)?;
-        println!("{name}: {bits} bits");
+    let values = [42u64, 65_535, 1_000_000, u32::MAX as u64, u64::MAX];
+
+    for profile in RECOMMENDED_PROFILES {
+        let max = profile.config.max_u64_value()?;
+        println!(
+            "{} ({}) — max u64 value: {}",
+            profile.label, profile.purpose, max
+        );
+        for value in values {
+            match lotus_encoded_bit_len(
+                value,
+                profile.config.jumpstarter_bits,
+                profile.config.tiers,
+            ) {
+                Ok(bits) => println!("  {value}: {bits} bits"),
+                Err(_) => println!("  {value}: out of range"),
+            }
+        }
     }
     Ok(())
 }
