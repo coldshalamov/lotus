@@ -17,10 +17,7 @@ fn round_trip(value: u64, j: usize, d: usize) {
     let (decoded, consumed) = lotus_decode_u64(&framed.bytes, j, d).expect("decode");
     assert_eq!(decoded, value);
     assert_eq!(consumed, framed.bit_len);
-    assert_eq!(
-        lotus_encoded_bit_len(value, j, d).unwrap(),
-        framed.bit_len
-    );
+    assert_eq!(lotus_encoded_bit_len(value, j, d).unwrap(), framed.bit_len);
 }
 
 #[test]
@@ -30,11 +27,7 @@ fn recommended_profile_boundaries_round_trip() {
         round_trip(value, LOTUS_TINY.jumpstarter_bits, LOTUS_TINY.tiers);
     }
     assert_eq!(
-        lotus_encode_u64(
-            tiny_max + 1,
-            LOTUS_TINY.jumpstarter_bits,
-            LOTUS_TINY.tiers,
-        ),
+        lotus_encode_u64(tiny_max + 1, LOTUS_TINY.jumpstarter_bits, LOTUS_TINY.tiers,),
         Err(LotusError::JumpstarterOverflow)
     );
 
@@ -179,10 +172,7 @@ fn exact_uniform_u64_regression_is_not_sampled() {
         .find(|result| result.label == "J1D2")
         .unwrap();
     assert_eq!(dense.total_bits, Some(1_300_495_457_194_375_872_390));
-    assert_eq!(
-        summary.leb128_total_bits,
-        1_401_371_549_788_580_740_096
-    );
+    assert_eq!(summary.leb128_total_bits, 1_401_371_549_788_580_740_096);
     let counts = dense.versus_leb128.unwrap();
     assert_eq!(counts.wins, 18_446_459_269_896_323_966);
     assert_eq!(counts.ties, 282_578_816_992_276);
@@ -198,25 +188,17 @@ fn packed_stream_round_trip_has_no_per_value_padding() {
     let mut expected_bits = 0usize;
 
     for &value in &values {
-        expected_bits += lotus_encode_into_writer(
-            value,
-            config.jumpstarter_bits,
-            config.tiers,
-            &mut writer,
-        )
-        .unwrap();
+        expected_bits +=
+            lotus_encode_into_writer(value, config.jumpstarter_bits, config.tiers, &mut writer)
+                .unwrap();
     }
     assert_eq!(writer.bits_written(), expected_bits);
 
     let bytes = writer.into_bytes();
     let mut reader = BitReader::new(&bytes);
     for &expected in &values {
-        let (decoded, _) = lotus_decode_from_reader(
-            &mut reader,
-            config.jumpstarter_bits,
-            config.tiers,
-        )
-        .unwrap();
+        let (decoded, _) =
+            lotus_decode_from_reader(&mut reader, config.jumpstarter_bits, config.tiers).unwrap();
         assert_eq!(decoded, expected);
     }
     assert_eq!(reader.bits_consumed(), expected_bits);
@@ -225,49 +207,28 @@ fn packed_stream_round_trip_has_no_per_value_padding() {
 #[test]
 fn standalone_padding_does_not_change_consumed_bits() {
     let config = LOTUS_DENSE_U64;
-    let framed = lotus_encode_u64_framed(
-        1_000_000,
-        config.jumpstarter_bits,
-        config.tiers,
-    )
-    .unwrap();
+    let framed = lotus_encode_u64_framed(1_000_000, config.jumpstarter_bits, config.tiers).unwrap();
     let mut extended = framed.bytes.clone();
     extended.extend_from_slice(&[0xff, 0xff]);
-    let (decoded, consumed) = lotus_decode_u64(
-        &extended,
-        config.jumpstarter_bits,
-        config.tiers,
-    )
-    .unwrap();
+    let (decoded, consumed) =
+        lotus_decode_u64(&extended, config.jumpstarter_bits, config.tiers).unwrap();
     assert_eq!(decoded, 1_000_000);
     assert_eq!(consumed, framed.bit_len);
 }
 
 #[test]
 fn malformed_and_truncated_inputs_fail_without_looping() {
-    assert_eq!(
-        lotus_decode_u64(&[], 1, 2),
-        Err(LotusError::UnexpectedEof)
-    );
+    assert_eq!(lotus_decode_u64(&[], 1, 2), Err(LotusError::UnexpectedEof));
     assert_eq!(
         lotus_decode_u64(&[0xff; 64], 8, 2),
         Err(LotusError::ValueTooLarge)
     );
 
     let config = LOTUS_FAST_U64;
-    let encoded = lotus_encode_u64(
-        u64::MAX,
-        config.jumpstarter_bits,
-        config.tiers,
-    )
-    .unwrap();
+    let encoded = lotus_encode_u64(u64::MAX, config.jumpstarter_bits, config.tiers).unwrap();
     for end in 0..encoded.len() {
         assert_eq!(
-            lotus_decode_u64(
-                &encoded[..end],
-                config.jumpstarter_bits,
-                config.tiers,
-            ),
+            lotus_decode_u64(&encoded[..end], config.jumpstarter_bits, config.tiers,),
             Err(LotusError::UnexpectedEof)
         );
     }

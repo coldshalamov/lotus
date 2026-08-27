@@ -3,9 +3,7 @@
 //! Size evidence uses exact interval aggregation. It never substitutes sparse
 //! samples for claims about complete integer domains.
 
-use crate::{
-    BitReader, BitWriter, LotusError, RECOMMENDED_PROFILES, lotus_encoded_bit_len,
-};
+use crate::{BitReader, BitWriter, LotusError, RECOMMENDED_PROFILES, lotus_encoded_bit_len};
 use std::collections::BTreeSet;
 
 /// A finite workload used only for runtime Criterion benchmarks.
@@ -472,9 +470,7 @@ pub fn elias_delta_encode(value: u64) -> Vec<u8> {
         } else {
             (x as u64) & ((1u64 << n) - 1)
         };
-        writer
-            .write_bits(suffix, n)
-            .expect("delta suffix fits");
+        writer.write_bits(suffix, n).expect("delta suffix fits");
     }
     writer.into_bytes()
 }

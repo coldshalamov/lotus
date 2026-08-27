@@ -435,9 +435,8 @@ fn decode_from_reader_config(
     let before = reader.bits_consumed();
 
     let jump = reader.read_bits(config.jumpstarter_bits)?;
-    let mut next_width =
-        usize::try_from(jump.checked_add(1).ok_or(LotusError::ValueTooLarge)?)
-            .map_err(|_| LotusError::ValueTooLarge)?;
+    let mut next_width = usize::try_from(jump.checked_add(1).ok_or(LotusError::ValueTooLarge)?)
+        .map_err(|_| LotusError::ValueTooLarge)?;
 
     for _ in 0..config.tiers {
         if next_width == 0 || next_width > u64::BITS as usize {
@@ -490,11 +489,7 @@ pub fn lotus_decode_u64(
 }
 
 /// Compute the exact Lotus bit length without allocating.
-pub fn lotus_encoded_bit_len(
-    value: u64,
-    j_bits: usize,
-    tiers: usize,
-) -> Result<usize, LotusError> {
+pub fn lotus_encoded_bit_len(value: u64, j_bits: usize, tiers: usize) -> Result<usize, LotusError> {
     Ok(build_width_chain(value, LotusConfig::new(j_bits, tiers))?.total_bits)
 }
 

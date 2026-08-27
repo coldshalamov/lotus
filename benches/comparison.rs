@@ -24,15 +24,19 @@ fn bench_encode(c: &mut Criterion, name: &str, values: &[u64]) {
         if !profile_covers(values, j, d) {
             continue;
         }
-        group.bench_with_input(BenchmarkId::new("LotusPacked", profile.label), values, |b, v| {
-            b.iter(|| {
-                let mut writer = BitWriter::new();
-                for &value in v {
-                    lotus_encode_into_writer(value, j, d, &mut writer).unwrap();
-                }
-                criterion::black_box(writer.into_bytes());
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("LotusPacked", profile.label),
+            values,
+            |b, v| {
+                b.iter(|| {
+                    let mut writer = BitWriter::new();
+                    for &value in v {
+                        lotus_encode_into_writer(value, j, d, &mut writer).unwrap();
+                    }
+                    criterion::black_box(writer.into_bytes());
+                });
+            },
+        );
     }
 
     group.bench_function("LEB128", |b| {

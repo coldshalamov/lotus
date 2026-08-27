@@ -103,9 +103,7 @@ fn read_stdin_to_string() -> io::Result<String> {
 }
 
 fn parse_u64_line(line: &str) -> Result<u64, LotusError> {
-    line.trim()
-        .parse()
-        .map_err(|_| LotusError::InvalidEncoding)
+    line.trim().parse().map_err(|_| LotusError::InvalidEncoding)
 }
 
 fn encode_mode(j: usize, d: usize, with_bits: bool) -> Result<(), LotusError> {
@@ -188,11 +186,7 @@ fn as_json_rows(summaries: &[SizeSummary]) -> Vec<SerializableSummary> {
                 })
                 .collect(),
             leb128_total_bits: summary.leb128_total_bits.to_string(),
-            leb128_bits_per_value: format_ratio(
-                summary.leb128_total_bits,
-                summary.values,
-                6,
-            ),
+            leb128_bits_per_value: format_ratio(summary.leb128_total_bits, summary.values, 6),
             vlq_total_bits: summary.vlq_total_bits.to_string(),
             vlq_bits_per_value: format_ratio(summary.vlq_total_bits, summary.values, 6),
             elias_gamma_total_bits: summary.elias_gamma_total_bits.to_string(),
@@ -311,9 +305,7 @@ fn render_markdown(summaries: &[SizeSummary]) -> String {
     }
 
     out.push_str("\n## Lotus versus LEB128\n\n");
-    out.push_str(
-        "| domain | profile | wins | ties | losses | win % | tie % | loss % |\n",
-    );
+    out.push_str("| domain | profile | wins | ties | losses | win % | tie % | loss % |\n");
     out.push_str("|---|---|---:|---:|---:|---:|---:|---:|\n");
     for summary in summaries {
         for config in &summary.lotus {
@@ -334,12 +326,8 @@ fn render_markdown(summaries: &[SizeSummary]) -> String {
     }
 
     out.push_str("\n## Framing caveat\n\n");
-    out.push_str(
-        "Lotus figures are meaningful packed bits. Independently padding every codeword ",
-    );
-    out.push_str(
-        "to a byte discards the byte-quantization advantage; use `EncodedLotus.bit_len` ",
-    );
+    out.push_str("Lotus figures are meaningful packed bits. Independently padding every codeword ");
+    out.push_str("to a byte discards the byte-quantization advantage; use `EncodedLotus.bit_len` ");
     out.push_str("or the streaming `BitWriter`/`BitReader` APIs.\n");
     out
 }

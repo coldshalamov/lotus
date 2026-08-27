@@ -1,6 +1,5 @@
 use lotus::{
-    BitReader, BitWriter, LOTUS_DENSE_U64, lotus_decode_from_reader,
-    lotus_encode_into_writer,
+    BitReader, BitWriter, LOTUS_DENSE_U64, lotus_decode_from_reader, lotus_encode_into_writer,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,23 +8,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut writer = BitWriter::new();
     for value in values {
-        lotus_encode_into_writer(
-            value,
-            config.jumpstarter_bits,
-            config.tiers,
-            &mut writer,
-        )?;
+        lotus_encode_into_writer(value, config.jumpstarter_bits, config.tiers, &mut writer)?;
     }
     let meaningful_bits = writer.bits_written();
     let bytes = writer.into_bytes();
 
     let mut reader = BitReader::new(&bytes);
     for expected in values {
-        let (decoded, _) = lotus_decode_from_reader(
-            &mut reader,
-            config.jumpstarter_bits,
-            config.tiers,
-        )?;
+        let (decoded, _) =
+            lotus_decode_from_reader(&mut reader, config.jumpstarter_bits, config.tiers)?;
         assert_eq!(decoded, expected);
     }
 
