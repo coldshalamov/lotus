@@ -1,0 +1,220 @@
+@media (max-width: 980px) {
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 48px;
+  }
+
+  .hero-copy {
+    max-width: 850px;
+  }
+
+  .proof-card {
+    max-width: 680px;
+  }
+
+  .section-heading-split,
+  .method-section {
+    grid-template-columns: 1fr;
+    gap: 25px;
+  }
+
+  .section-heading > p {
+    max-width: 700px;
+  }
+
+  .inspector-grid,
+  .evidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inspector-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .preset-group,
+  .current-verdict {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    width: min(var(--shell), calc(100% - 30px));
+  }
+
+  .header-inner {
+    min-height: 66px;
+  }
+
+  .site-nav a:not(.nav-source) {
+    display: none;
+  }
+
+  .hero {
+    padding-top: 58px;
+  }
+
+  .hero h1 {
+    font-size: clamp(3rem, 16vw, 4.7rem);
+  }
+
+  .hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .button {
+    width: 100%;
+  }
+
+  .proof-grid,
+  .evidence-stats,
+  .method-links {
+    grid-template-columns: 1fr;
+  }
+
+  .proof-grid {
+    gap: 17px;
+  }
+
+  .race-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .race-controls {
+    padding-bottom: 0;
+  }
+
+  .race-status-row,
+  .race-entry-head,
+  .race-entry-foot {
+    align-items: flex-start;
+  }
+
+  .race-status-row,
+  .race-entry-foot {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .race-readout {
+    max-width: 48%;
+  }
+
+  .race-readout strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .race-result {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .lotus-finish-marker {
+    display: none;
+  }
+
+  .inspector-controls {
+    display: flex;
+  }
+
+  .preset-buttons {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .codec-bar-row {
+    grid-template-columns: 88px minmax(0, 1fr) 48px;
+    gap: 9px;
+  }
+
+  .codeword {
+    overflow-x: auto;
+    padding-bottom: 7px;
+  }
+
+  .codeword-field {
+    flex-basis: auto !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .evidence-stats article,
+  .evidence-stats article:first-child {
+    padding: 24px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .evidence-stats article:last-child {
+    border-bottom: 0;
+  }
+
+  .method-links {
+    gap: 8px;
+  }
+
+  .footer-inner {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding-block: 20px;
+  }
+}
+
+@media (max-width: 420px) {
+  .hero h1 {
+    letter-spacing: -0.058em;
+  }
+
+  .proof-card,
+  .race-panel,
+  .inspector-controls,
+  .codec-chart-panel,
+  .codeword-panel,
+  .distribution-panel,
+  .growth-panel,
+  .frontier-panel {
+    border-radius: 17px;
+  }
+
+  .race-entry {
+    padding-inline: 15px;
+  }
+
+  .race-name,
+  .race-note {
+    display: block;
+    margin-left: 0;
+  }
+
+  .race-note {
+    margin-top: 2px;
+  }
+
+  .panel-title-row {
+    flex-direction: column;
+  }
+
+  .chart-value {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Format
         run: cargo fmt --all --check
@@ -26,6 +29,13 @@ jobs:
 
       - name: Verify generated benchmark artifacts
         run: scripts/check_generated.sh
+
+      - name: Verify browser demo contract
+        run: |
+          node --check docs/lotus-core.mjs
+          node --check docs/demo.mjs
+          node --check scripts/check_demo.mjs
+          node scripts/check_demo.mjs
 
       - name: Bench smoke test
         run: cargo bench --bench comparison -- --sample-size 10
