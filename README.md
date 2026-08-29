@@ -4,7 +4,7 @@ Lotus is a parametric bit-level integer codec for Rust. It maps every fixed-widt
 
 The repository now contains one canonical format definition, one codec implementation, one recommended configuration frontier, and generated evidence derived from that implementation.
 
-> Open [`docs/index.html`](docs/index.html) for the interactive demo. It loads a Rust-generated boundary fixture and refuses to present itself as verified if the JavaScript port drifts.
+> Open [`docs/index.html`](docs/index.html) for the interactive demo. Its shared-budget race is driven by exact interval aggregation, and the page disables its claims if either the Rust boundary fixture or the independently reconstructed complete-`u32` totals drift.
 
 ## Canonical mapping
 
@@ -71,6 +71,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo test --all-features
 scripts/check_generated.sh
+node scripts/check_demo.mjs
 cargo bench --bench comparison
 ```
 
